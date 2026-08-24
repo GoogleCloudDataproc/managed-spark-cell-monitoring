@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+lazy val sharedShadeRules = Seq(
+  ShadeRule.rename("org.json4s.**" -> "managed_spark_cell_monitoring.shaded.org.json4s.@1").inAll,
+  ShadeRule.rename("com.fasterxml.jackson.**" -> "managed_spark_cell_monitoring.shaded.com.fasterxml.jackson.@1").inAll
+)
+
 lazy val commonSettings = Seq(
   organization := "com.google.cloud.dataproc",
   version := "1.0.0"

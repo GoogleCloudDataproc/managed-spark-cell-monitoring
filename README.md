@@ -100,7 +100,7 @@ The Scala listener is compiled using `sbt` and supports Spark 3 (Scala 2.12) and
 cd scala
 
 # Build shaded Fat JARs for both Spark 3 and Spark 4 simultaneously
-sbt "project spark3" assembly "++2.13.11" "project spark4" assembly
+sbt "project spark3" assembly "project spark4" assembly
 
 # Run the test suite and generate a coverage report
 sbt coverage "project core" test coverageReport

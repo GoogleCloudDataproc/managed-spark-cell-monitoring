@@ -58,15 +58,34 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
   startConnection()
 
   /** Send a string message to the kernel using the socket. */
-  def send(msg: String): Unit = synchronized {
-    try {
-      if (out != null) {
-        out.write(msg + ";EOD:")
-        out.flush()
+  private val messageQueue = new java.util.concurrent.LinkedBlockingQueue[String]()
+  @volatile private var running = true
+  private val senderThread = {
+    val t = new Thread(new Runnable {
+      override def run(): Unit = {
+        while (running) {
+          try {
+            val msg = messageQueue.take()
+            synchronized {
+              if (out != null) {
+                out.write(msg + ";EOD:")
+                out.flush()
+              }
+            }
+          } catch {
+            case _: InterruptedException => Thread.currentThread().interrupt()
+            case _: Throwable => ()
+          }
+        }
       }
-    } catch {
-      case _: Throwable => ()
-    }
+    })
+    t.setDaemon(true)
+    t.start()
+    t
+  }
+
+  def send(msg: String): Unit = {
+    messageQueue.offer(msg)
   }
 
   /** Start the socket connection to the kernel and start the send task. The kernel is the server already waiting for connections.*/
@@ -76,8 +95,9 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
       return
     }
     try {
-      socket = new Socket("localhost", port.toInt)
-      out = new OutputStreamWriter(socket.getOutputStream())
+      val parsedPort = port.toInt
+      socket = new Socket("localhost", parsedPort)
+      out = new OutputStreamWriter(socket.getOutputStream(), java.nio.charset.StandardCharsets.UTF_8)
 
       activeTimer = new Timer(true)
 
@@ -90,23 +110,49 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
       }
       activeTimer.schedule(onStageStatusActiveTask, sparkStageActiveRate, sparkStageActiveRate)
     } catch {
-      case _: Throwable => ()
+      case e: Throwable =>
+        logger.error("Failed to start connection to Jupyter kernel", e)
+        if (socket != null) {
+          try { socket.close() } catch { case _: Throwable => }
+          socket = null
+        }
+        if (out != null) {
+          try { out.close() } catch { case _: Throwable => }
+          out = null
+        }
     }
   }
 
   /** Close the socket connection to the kernel.*/
   def closeConnection(): Unit = {
+    // Wait briefly for the queue to drain before shutting down
+    var waitTime = 0
+    while (!messageQueue.isEmpty && waitTime < 2000) {
+      Thread.sleep(10)
+      waitTime += 10
+    }
+    
+    running = false
+    if (senderThread != null) {
+      try { senderThread.interrupt() } catch { case _: Throwable => }
+    }
+    messageQueue.clear()
+
     if (out != null) {
       try { out.close() } catch { case _: Throwable => }
+      out = null
     }
     if (socket != null) {
       try { socket.close() } catch { case _: Throwable => }
+      socket = null
     }
     if (onStageStatusActiveTask != null) {
       try { onStageStatusActiveTask.cancel() } catch { case _: Throwable => }
+      onStageStatusActiveTask = null
     }
     if (activeTimer != null) {
       try { activeTimer.cancel() } catch { case _: Throwable => }
+      activeTimer = null
     }
   }
 
@@ -212,7 +258,7 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
     }
     jobIdToData(jobStart.jobId) = jobData
     for (stageId <- jobStart.stageIds) {
-      stageIdToActiveJobIds.getOrElseUpdate(stageId, new HashSet[StageId]).add(jobStart.jobId)
+      stageIdToActiveJobIds.getOrElseUpdate(stageId, new HashSet[JobId]).add(jobStart.jobId)
     }
     // If there's no information for a stage, store the StageInfo received from the scheduler
     // so that we can display stage descriptions for pending stages:
@@ -220,7 +266,7 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
       stageIdToInfo.getOrElseUpdate(stageInfo.stageId, stageInfo)
       stageIdToData.getOrElseUpdate((stageInfo.stageId, getStageAttemptNumber(stageInfo)), new StageUIData)
     }
-    val name = jobStart.properties.getProperty("callSite.short", "null")
+    val name = Option(jobStart.properties).map(_.getProperty("callSite.short", "null")).getOrElse("null")
     val json = ("msgtype" -> "sparkJobStart") ~
       ("jobGroup" -> jobGroup.getOrElse("null")) ~
       ("jobId" -> jobStart.jobId) ~
@@ -374,7 +420,7 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
   /** Called when a task is started. */
   override def onTaskStart(taskStart: SparkListenerTaskStart): Unit = synchronized {
     val taskInfo = taskStart.taskInfo
-    if (taskInfo != null) {
+    if (taskInfo != null && stageIdToInfo.contains(taskStart.stageId)) {
       val stageData = stageIdToData.getOrElseUpdate((taskStart.stageId, taskStart.stageAttemptId), {
         new StageUIData
       })
@@ -389,7 +435,7 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
     // If stage attempt id is -1, it means the DAGScheduler had no idea which attempt this task
     // completion event is for. Let's just drop it here. This means we might have some speculation
     // tasks on the web ui that's never marked as complete.
-    if (info != null && taskEnd.stageAttemptId != -1) {
+    if (info != null && taskEnd.stageAttemptId != -1 && stageIdToInfo.contains(taskEnd.stageId)) {
       val stageData = stageIdToData.getOrElseUpdate((taskEnd.stageId, taskEnd.stageAttemptId), {
         new StageUIData
       })

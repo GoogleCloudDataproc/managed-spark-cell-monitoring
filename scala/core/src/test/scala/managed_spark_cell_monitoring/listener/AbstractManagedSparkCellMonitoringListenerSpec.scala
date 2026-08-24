@@ -72,18 +72,23 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
   def readFromSocket(server: ServerSocket): String = {
     val socket = server.accept()
     socket.setSoTimeout(5000) // PREVENT HANGING ON READ
-    val in = new BufferedReader(new InputStreamReader(socket.getInputStream))
-    val sb = new StringBuilder()
-    var continue = true
-    while (continue) {
-      val c = in.read()
-      if (c == -1) continue = false
-      else {
-        sb.append(c.toChar)
-        if (sb.toString().endsWith(";EOD:")) continue = false
+    val in = new BufferedReader(new InputStreamReader(socket.getInputStream, java.nio.charset.StandardCharsets.UTF_8))
+    try {
+      val sb = new StringBuilder()
+      var continue = true
+      while (continue) {
+        val c = in.read()
+        if (c == -1) continue = false
+        else {
+          sb.append(c.toChar)
+          if (sb.toString().endsWith(";EOD:")) continue = false
+        }
       }
+      sb.toString()
+    } finally {
+      in.close()
+      socket.close()
     }
-    sb.toString()
   }
 
   it should "successfully connect and send JSON when port is provided" in {
