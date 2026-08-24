@@ -46,6 +46,22 @@ c.InteractiveShellApp.extensions = [
 ]
 ```
 
+### 3. Configure Spark Session
+
+Create your Spark session with the extra configurations to activate the Scala Listener. You must set `spark.extraListeners` to the fully qualified class name and `spark.driver.extraClassPath` to the physical path of the compiled JAR.
+
+```python
+from pyspark.sql import SparkSession
+
+# Replace with the path to the correct JAR for your Spark version
+JAR_PATH = "path/to/managed-spark-cell-monitoring-spark4-assembly-1.0.0.jar"
+
+spark = SparkSession.builder \
+        .config('spark.extraListeners', 'managed_spark_cell_monitoring.listener.JupyterManagedSparkCellMonitoringListener') \
+        .config('spark.driver.extraClassPath', JAR_PATH) \
+        .getOrCreate()
+```
+
 ---
 
 ## Development & Building
@@ -78,16 +94,16 @@ python -m build --wheel
 ```
 
 #### 3. Scala Listener JARs
-The Scala listener is compiled using `sbt`.
+The Scala listener is compiled using `sbt` and supports Spark 3 (Scala 2.12) and Spark 4 (Scala 2.13). We use the `sbt-assembly` plugin to build shaded Fat JARs.
 ```bash
-# Navigate to the appropriate spark version directory (e.g., scalalistener_spark3)
-cd scalalistener_spark3
+# Navigate to the scala directory
+cd scala
 
-# Build Scala listener JAR (Thin JAR)
-sbt package
+# Build shaded Fat JARs for both Spark 3 and Spark 4 simultaneously
+sbt "project spark3" assembly "++2.13.11" "project spark4" assembly
 
-# Build Scala listener JAR (Fat JAR)
-sbt assembly
+# Run the test suite and generate a coverage report
+sbt coverage "project core" test coverageReport
 ```
 
 ---
