@@ -91,6 +91,12 @@ pip install build
 
 # Build the Python kernel extension wheel
 python -m build --wheel
+
+# Install testing dependencies
+pip install pytest pytest-mock pytest-cov
+
+# Run the Python unit tests with coverage
+python3 -m pytest --cov=.
 ```
 
 #### 3. Scala Listener JARs
