@@ -32,10 +32,7 @@ lazy val core = (project in file("core"))
       "org.apache.spark" %% "spark-core" % "3.4.1" % "provided",
       "org.json4s" %% "json4s-jackson" % "3.7.0-M11"
     ),
-    assembly / assemblyShadeRules := Seq(
-      ShadeRule.rename("org.json4s.**" -> "managed_spark_cell_monitoring.shaded.org.json4s.@1").inAll,
-      ShadeRule.rename("com.fasterxml.jackson.**" -> "managed_spark_cell_monitoring.shaded.com.fasterxml.jackson.@1").inAll
-    )
+    assembly / assemblyShadeRules := sharedShadeRules
   )
 
 lazy val spark3 = (project in file("spark-3"))
@@ -50,10 +47,7 @@ lazy val spark3 = (project in file("spark-3"))
       "org.apache.spark" %% "spark-core" % "3.4.1" % "provided",
       "org.json4s" %% "json4s-jackson" % "3.7.0-M11"
     ),
-    assembly / assemblyShadeRules := Seq(
-      ShadeRule.rename("org.json4s.**" -> "managed_spark_cell_monitoring.shaded.org.json4s.@1").inAll,
-      ShadeRule.rename("com.fasterxml.jackson.**" -> "managed_spark_cell_monitoring.shaded.com.fasterxml.jackson.@1").inAll
-    )
+    assembly / assemblyShadeRules := sharedShadeRules
   )
 
 lazy val spark4 = (project in file("spark-4"))
@@ -68,10 +62,7 @@ lazy val spark4 = (project in file("spark-4"))
       "org.apache.spark" %% "spark-core" % "4.0.0-preview1" % "provided",
       "org.json4s" %% "json4s-jackson" % "3.7.0-M11"
     ),
-    assembly / assemblyShadeRules := Seq(
-      ShadeRule.rename("org.json4s.**" -> "managed_spark_cell_monitoring.shaded.org.json4s.@1").inAll,
-      ShadeRule.rename("com.fasterxml.jackson.**" -> "managed_spark_cell_monitoring.shaded.com.fasterxml.jackson.@1").inAll
-    )
+    assembly / assemblyShadeRules := sharedShadeRules
   )
 
 ThisBuild / assemblyMergeStrategy := {
