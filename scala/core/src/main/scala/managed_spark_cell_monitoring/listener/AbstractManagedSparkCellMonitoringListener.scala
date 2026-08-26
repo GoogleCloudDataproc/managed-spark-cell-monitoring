@@ -14,7 +14,10 @@
 // limitations under the License.
 
 package managed_spark_cell_monitoring.listener
-/** This package provides a custom implementation of a SparkListener interface that forwards data to Jupyter Kernels. */
+/**
+ * This package provides a custom implementation of a SparkListener interface
+ * that forwards data to Jupyter Kernels.
+ */
 
 import org.apache.spark.scheduler._
 import org.json4s._
@@ -31,12 +34,20 @@ import java.util.{TimerTask,Timer}
 /**
  * A SparkListener Implementation that forwards data to a Jupyter Kernel
  *
+ * WARNING: This abstract class must remain compatible with multiple combinations of
+ * Spark and Scala versions (e.g., Spark 3.5 + Scala 2.12 and Spark 4.0 + Scala 2.13).
+ * Any implementation details that differ between these versions must be factored
+ * into the version-specific subclasses.
+ *
  *  - All data is forwarded to a jupyter kernel using sockets configured by an environment variable.
- *  - The listener receives notifications of the spark application's events, through the overrided methods.
+ *  - The listener receives notifications of the spark application's events, through the overrided
+ *    methods.
  *  - The received data is stored and sent as JSON to the kernel socket.
  *  - Overrides methods that correspond to events in a spark Application.
- *  - The argument for each overrided method contains the received data for that event. (See SparkListener docs for more information.)
- *  - For each application, job, stage, and task there is a 'start' and an 'end' event. For executors, there are 'added' and 'removed' events
+ *  - The argument for each overrided method contains the received data for that event. (See
+ *    SparkListener docs for more information.)
+ *  - For each application, job, stage, and task there is a 'start' and an 'end' event. For
+ *    executors, there are 'added' and 'removed' events
  *
  *  @constructor called by Spark internally
  *  @param conf Spark configuration object used to start the spark application.
@@ -46,14 +57,15 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
   protected def getStageAttemptNumber(stageInfo: StageInfo): Int
   protected def removeFirstNElements[T](buffer: ListBuffer[T], n: Int): Unit
 
+  private val PortMissingFallback = "ERRORNOTFOUND"
 
   val logger = Logger.getLogger(this.getClass.getName)
-  val port = scala.util.Properties.envOrElse("SPARK_CELL_MONITOR_KERNEL_PORT", "ERRORNOTFOUND")
+  val port = scala.util.Properties.envOrElse("SPARK_CELL_MONITOR_KERNEL_PORT", PortMissingFallback)
   var socket: Socket = null
   var onStageStatusActiveTask: TimerTask = null
   var activeTimer: Timer = null
   var out: OutputStreamWriter = null
-  val sparkStageActiveRate: Long = 250L // 250ms
+  val sparkStageActiveIntervalMs: Long = 250L
 
   startConnection()
 
@@ -88,16 +100,21 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
     messageQueue.offer(msg)
   }
 
-  /** Start the socket connection to the kernel and start the send task. The kernel is the server already waiting for connections.*/
+  /**
+   * Start the socket connection to the kernel and start the send task. The kernel is the server
+   * already waiting for connections.
+   */
   def startConnection(): Unit = {
-    if (port == "ERRORNOTFOUND") {
-      logger.warn("SPARK_CELL_MONITOR_KERNEL_PORT not found in environment. Managed Spark Cell Monitoring listener will be disabled.")
+    if (port == PortMissingFallback) {
+      logger.warn("SPARK_CELL_MONITOR_KERNEL_PORT not found in environment. " +
+        "Managed Spark Cell Monitoring listener will be disabled.")
       return
     }
     try {
       val parsedPort = port.toInt
       socket = new Socket("localhost", parsedPort)
-      out = new OutputStreamWriter(socket.getOutputStream(), java.nio.charset.StandardCharsets.UTF_8)
+      out = new OutputStreamWriter(
+        socket.getOutputStream(), java.nio.charset.StandardCharsets.UTF_8)
 
       activeTimer = new Timer(true)
 
@@ -108,7 +125,8 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
           }
         }
       }
-      activeTimer.schedule(onStageStatusActiveTask, sparkStageActiveRate, sparkStageActiveRate)
+      activeTimer.schedule(
+        onStageStatusActiveTask, sparkStageActiveIntervalMs, sparkStageActiveIntervalMs)
     } catch {
       case e: Throwable =>
         logger.error("Failed to start connection to Jupyter kernel", e)
@@ -126,10 +144,10 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
   /** Close the socket connection to the kernel.*/
   def closeConnection(): Unit = {
     // Wait briefly for the queue to drain before shutting down
-    var waitTime = 0
-    while (!messageQueue.isEmpty && waitTime < 2000) {
+    var waitTimeMs = 0
+    while (!messageQueue.isEmpty && waitTimeMs < 2000) {
       Thread.sleep(10)
-      waitTime += 10
+      waitTimeMs += 10
     }
     
     running = false
@@ -161,15 +179,15 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
   type StageId = Int
   type StageAttemptId = Int
 
-  //Application
+  // Application
   var appId: String = ""
 
-  //Jobs
+  // Jobs
   val completedJobs = ListBuffer[JobUIData]()
   val failedJobs = ListBuffer[JobUIData]()
   val jobIdToData = new HashMap[JobId, JobUIData]
 
-  // Stages:
+  // Stages
   val activeStages = new HashMap[StageId, StageInfo]
   val completedStages = ListBuffer[StageInfo]()
   val skippedStages = ListBuffer[StageInfo]()
@@ -178,7 +196,7 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
   val stageIdToInfo = new HashMap[StageId, StageInfo]
   val stageIdToActiveJobIds = new HashMap[StageId, HashSet[JobId]]
 
-
+  // Configuration and Execution State
   val retainedStages = conf.getInt("spark.ui.retainedStages", 1000)
   val retainedJobs = conf.getInt("spark.ui.retainedJobs", 1000)
 
@@ -232,7 +250,8 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
   /**
    * Called when a job starts.
    *
-   * The jobStart object contains the list of planned stages. They are stored for tracking skipped stages.
+   * The jobStart object contains the list of planned stages. They are stored for tracking skipped
+   * stages.
    * The total number of tasks is also estimated from the list of planned stages,
    */
   override def onJobStart(jobStart: SparkListenerJobStart): Unit = synchronized {
@@ -264,9 +283,11 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
     // so that we can display stage descriptions for pending stages:
     for (stageInfo <- jobStart.stageInfos) {
       stageIdToInfo.getOrElseUpdate(stageInfo.stageId, stageInfo)
-      stageIdToData.getOrElseUpdate((stageInfo.stageId, getStageAttemptNumber(stageInfo)), new StageUIData)
+      stageIdToData.getOrElseUpdate(
+        (stageInfo.stageId, getStageAttemptNumber(stageInfo)), new StageUIData)
     }
-    val name = Option(jobStart.properties).map(_.getProperty("callSite.short", "null")).getOrElse("null")
+    val name = Option(jobStart.properties)
+      .map(_.getProperty("callSite.short", "null")).getOrElse("null")
     val json = ("msgtype" -> "sparkJobStart") ~
       ("jobGroup" -> jobGroup.getOrElse("null")) ~
       ("jobId" -> jobStart.jobId) ~
@@ -365,7 +386,8 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
     val stage = stageSubmitted.stageInfo
     activeStages(stage.stageId) = stage
     stageIdToInfo(stage.stageId) = stage
-    val stageData = stageIdToData.getOrElseUpdate((stage.stageId, getStageAttemptNumber(stage)), new StageUIData)
+    val stageData = stageIdToData.getOrElseUpdate(
+      (stage.stageId, getStageAttemptNumber(stage)), new StageUIData)
 
     val activeJobsDependentOnStage = stageIdToActiveJobIds.get(stage.stageId)
     val jobIds = activeJobsDependentOnStage
@@ -385,7 +407,8 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
   def onStageStatusActive(): Unit = synchronized {
     // 1. Update on status of active stages
     for ((stageId, stageInfo) <- activeStages) {
-      val stageData = stageIdToData.getOrElseUpdate((stageInfo.stageId, getStageAttemptNumber(stageInfo)), new StageUIData)
+      val stageData = stageIdToData.getOrElseUpdate(
+        (stageInfo.stageId, getStageAttemptNumber(stageInfo)), new StageUIData)
       val jobIds = stageIdToActiveJobIds.get(stageInfo.stageId)
 
       val currentActive = stageData.numActiveTasks
@@ -497,7 +520,8 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
   }
 
   /** Called when an executor is removed. */
-  override def onExecutorRemoved(executorRemoved: SparkListenerExecutorRemoved): Unit = synchronized {
+  override def onExecutorRemoved(
+      executorRemoved: SparkListenerExecutorRemoved): Unit = synchronized {
     totalCores -= executorCores.getOrElse(executorRemoved.executorId, 0)
     numExecutors -= 1
     val json = ("msgtype" -> "sparkExecutorRemoved") ~
