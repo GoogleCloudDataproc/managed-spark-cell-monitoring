@@ -131,6 +131,7 @@ class CellMonitorExtension:
               widget, 'cell_finished', False
           ):
             if widget.run_id in self.active_widgets:
+              widget.cleanup()
               del self.active_widgets[widget.run_id]
 
         # Memory Cleanup: the job is finished, so we no longer need to track
@@ -188,6 +189,7 @@ class CellMonitorExtension:
       widget = self.active_widgets[self.run_id]
       widget.cell_finished = True
       if widget.active_jobs_count <= 0:
+        widget.cleanup()
         del self.active_widgets[self.run_id]
 
 
@@ -213,6 +215,7 @@ class SocketThread(threading.Thread):
         pass
       except Exception as e:  # pylint: disable=broad-exception-caught
         logger.debug('Socket accept interrupted or failed: %s', e)
+        break
 
 
 class SocketReader(threading.Thread):
@@ -226,19 +229,18 @@ class SocketReader(threading.Thread):
 
   def run(self):
     """Buffered stream reader loop using custom ;EOD: delimiter."""
-    buffer = ''
+    buffer = b''
     while True:
       try:
         data = self.client.recv(8192)
         if not data:
           break
-        decoded_data = data.decode('utf-8')
-        buffer += decoded_data
-        while ';EOD:' in buffer:
-          line, buffer = buffer.split(';EOD:', 1)
+        buffer += data
+        while b';EOD:' in buffer:
+          line, buffer = buffer.split(b';EOD:', 1)
           if line:
             try:
-              msg = json.loads(line)
+              msg = json.loads(line.decode('utf-8'))
               self.extension_context.send_to_frontend(msg)
             except Exception as e:  # pylint: disable=broad-exception-caught
               logger.warning('Failed to parse JSON packet: %s', e)
@@ -250,18 +252,24 @@ class SocketReader(threading.Thread):
 
 def _patch_spark_context(extension_context):
   """Monkey-patches SparkContext.__init__ to automatically inject Job Groups."""
+  _patch_spark_context.active_context = extension_context
   try:
     from pyspark import SparkContext  # pylint: disable=g-import-not-at-top
+
+    if getattr(SparkContext.__init__, '_patched_by_cell_monitor', False):
+      return
 
     orig_init = SparkContext.__init__
 
     def patched_init(self, *args, **kwargs):
       orig_init(self, *args, **kwargs)
-      if extension_context.run_id:
+      ctx = getattr(_patch_spark_context, 'active_context', None)
+      if ctx and ctx.run_id:
         self.setJobGroup(
-            extension_context.run_id, 'ManagedSparkCellMonitoring cell tracking'
+            ctx.run_id, 'ManagedSparkCellMonitoring cell tracking'
         )
 
+    patched_init._patched_by_cell_monitor = True
     SparkContext.__init__ = patched_init
   except Exception as e:  # pylint: disable=broad-exception-caught
     logger.warning('Failed to monkey-patch SparkContext: %s', e)

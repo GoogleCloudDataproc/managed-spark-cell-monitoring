@@ -38,4 +38,4 @@ def test_append_event_sends_sequence():
   event_payload = {"some": "data"}
   widget.append_event(event_payload, sequence=5)
 
-  widget.send.assert_called_once_with({"some": "data", "sequence": 5})
+  widget.send.assert_called_once_with({"type": "spark_event", "data": {"some": "data"}, "sequence": 5})
