@@ -142,7 +142,10 @@ class CellMonitorExtension:
       
       if not widget:
         if msgtype == 'sparkJobEnd':
-          logger.debug('Could not find active widget for sparkJobEnd (jobId: %s)', spark_msg.get('jobId'))
+          logger.debug(
+              'Could not find active widget for sparkJobEnd (jobId: %s)',
+              spark_msg.get('jobId')
+          )
           return
         elif self.active_widgets:
           # Fallback: if we can't map the event to a specific job, send it to
