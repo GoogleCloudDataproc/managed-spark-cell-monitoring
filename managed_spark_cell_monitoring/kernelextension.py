@@ -80,86 +80,94 @@ class CellMonitorExtension:
       widget = next(iter(self.active_widgets.values()))
     return widget
 
+  def _get_target_run_id(self, spark_msg, msgtype):
+    """Determines the correct run_id for the given message."""
+    # jobGroup acts as the run_id when spark routing is used (e.g., Classic
+    # PySpark). We fallback to self.run_id for Spark Connect or when
+    # jobGroup isn't set.
+    if msgtype == 'sparkJobStart':
+      jg = spark_msg.get('jobGroup')
+      return jg if jg and jg != 'null' and jg != '' else self.run_id
+    
+    if 'jobId' in spark_msg:
+      return self.job_to_run_id.get(spark_msg['jobId'])
+        
+    return None
+
+  def _handle_job_start(self, widget, spark_msg):
+    # Map this new Spark job to the correct widget's run_id so future
+    # stage/task events for this job can be routed to the same widget.
+    self.job_to_run_id[spark_msg['jobId']] = widget.run_id
+    widget.active_jobs_count += 1
+    widget.append_event(spark_msg, self.sequence_counter)
+
+  def _handle_job_end(self, widget, spark_msg):
+    widget.append_event(spark_msg, self.sequence_counter)
+    widget.active_jobs_count -= 1
+    # If the Jupyter cell has finished executing AND all Spark jobs for
+    # this cell have completed, it is safe to remove the widget from
+    # active tracking.
+    if widget.active_jobs_count <= 0 and getattr(widget, 'cell_finished', False):
+      if widget.run_id in self.active_widgets:
+        widget.cleanup()
+        del self.active_widgets[widget.run_id]
+
+    # Memory Cleanup: the job is finished, so we no longer need to track
+    # its routing.
+    job_id = spark_msg.get('jobId')
+    if job_id in self.job_to_run_id:
+      del self.job_to_run_id[job_id]
+
+  def _handle_generic_event(self, widget, spark_msg):
+    widget.append_event(spark_msg, self.sequence_counter)
+
   def send_to_frontend(self, msg):
     """Routes a message to the appropriate frontend widget."""
+    # Strict Formatting Check: Must be a dict and must possess a msgtype.
+    if not isinstance(msg, dict):
+      logger.warning('Received malformed spark event: expected dictionary')
+      return
+      
+    msgtype = msg.get('msgtype')
+    if not msgtype:
+      logger.warning("Received malformed spark event: missing 'msgtype' key")
+      return
+
     try:
       spark_msg = msg
-      if isinstance(msg, dict) and 'msg' in msg:
-        try:
-          spark_msg = (
-              json.loads(msg['msg'])
-              if isinstance(msg['msg'], str)
-              else msg['msg']
-          )
-        except Exception as e:  # pylint: disable=broad-exception-caught
-          logger.debug('Failed to unnest spark message: %s', e)
-
       self.sequence_counter += 1
-      msgtype = (
-          spark_msg.get('msgtype') if isinstance(spark_msg, dict) else None
-      )
+      
+      target_run_id = self._get_target_run_id(spark_msg, msgtype)
+      widget = self._resolve_widget(target_run_id)
+      
+      if not widget:
+        if msgtype == 'sparkJobEnd':
+          logger.debug('Could not find active widget for sparkJobEnd (jobId: %s)', spark_msg.get('jobId'))
+          return
+        elif self.active_widgets:
+          # Fallback: if we can't map the event to a specific job, send it to
+          # the most recent active widget.
+          logger.debug('Message routed to fallback primary widget: %s', msgtype)
+          widget = next(iter(self.active_widgets.values()))
+        else:
+          # Log when we completely drop an event because no widgets exist
+          logger.debug('Dropped spark event (no active widgets found): %s', msgtype)
+          return
 
       # Route messages based on Job ID mappings
       if msgtype == 'sparkJobStart':
-        # jobGroup acts as the run_id when spark routing is used (e.g., Classic
-        # PySpark). We fallback to self.run_id for Spark Connect or when
-        # jobGroup isn't set.
-        jg = spark_msg.get('jobGroup')
-        current_run_id = (
-            jg if jg and jg != 'null' and (jg != '') else self.run_id
-        )
-        widget = self._resolve_widget(current_run_id)
-        if widget:
-          # Map this new Spark job to the correct widget's run_id so future
-          # stage/task events for this job can be routed to the same widget.
-          self.job_to_run_id[spark_msg['jobId']] = widget.run_id
-          widget.active_jobs_count += 1
-          widget.append_event(spark_msg, self.sequence_counter)
-
+        self._handle_job_start(widget, spark_msg)
       elif msgtype == 'sparkJobEnd':
-        # Find the widget that originally tracked the start of this job.
-        job_id = spark_msg.get('jobId')
-        target_run_id = self.job_to_run_id.get(job_id)
-        widget = self._resolve_widget(target_run_id)
-        if widget:
-          widget.append_event(spark_msg, self.sequence_counter)
-          widget.active_jobs_count -= 1
-          # If the Jupyter cell has finished executing AND all Spark jobs for
-          # this cell have completed, it is safe to remove the widget from
-          # active tracking.
-          if widget.active_jobs_count <= 0 and getattr(
-              widget, 'cell_finished', False
-          ):
-            if widget.run_id in self.active_widgets:
-              widget.cleanup()
-              del self.active_widgets[widget.run_id]
-
-        # Memory Cleanup: the job is finished, so we no longer need to track
-        # its routing.
-        if job_id in self.job_to_run_id:
-          del self.job_to_run_id[job_id]
-
-      elif isinstance(spark_msg, dict) and 'jobId' in spark_msg:
-        # For events tied to a single job (like stages), route based on the
-        # jobId mapping.
-        target_run_id = self.job_to_run_id.get(spark_msg['jobId'])
-        widget = self._resolve_widget(target_run_id)
-        if widget:
-          widget.append_event(spark_msg, self.sequence_counter)
-
-      elif isinstance(spark_msg, dict) and 'jobIds' in spark_msg:
-        # Some events may be associated with multiple jobs.
+        self._handle_job_end(widget, spark_msg)
+      else:
+        self._handle_generic_event(widget, spark_msg)
+          
+      if isinstance(spark_msg, dict) and 'jobIds' in spark_msg:
         for jid in spark_msg['jobIds']:
-          target_run_id = self.job_to_run_id.get(jid)
-          widget = self._resolve_widget(target_run_id)
-          if widget:
-            widget.append_event(spark_msg, self.sequence_counter)
+          w = self._resolve_widget(self.job_to_run_id.get(jid))
+          if w and w != widget:
+            self._handle_generic_event(w, spark_msg)
 
-      elif self.active_widgets:
-        # Fallback: if we can't map the event to a specific job, send it to
-        # the most recent active widget.
-        primary_widget = next(iter(self.active_widgets.values()))
-        primary_widget.append_event(spark_msg, self.sequence_counter)
     except Exception as e:  # pylint: disable=broad-exception-caught
       logger.warning('Error processing spark event', exc_info=True)
 
@@ -167,12 +175,16 @@ class CellMonitorExtension:
     """Initializes tracking state and renders a new widget before a cell runs."""
     self.sequence_counter = 0
     self.run_id = str(uuid.uuid4())
-    try:
-      from pyspark import SparkContext  # pylint: disable=g-import-not-at-top
 
-      sc = SparkContext._active_spark_context  # pylint: disable=protected-access
-      if sc:
-        sc.setJobGroup(self.run_id, 'ManagedSparkCellMonitoring cell tracking')
+    try:
+      from pyspark.sql import SparkSession  # pylint: disable=g-import-not-at-top
+
+      session = SparkSession.getActiveSession() or SparkSession.getDefaultSession()
+
+      if session and hasattr(session, "sparkContext"):
+        session.sparkContext.setJobGroup(
+            self.run_id, 'IPython Cell Execution', interruptOnCancel=True
+        )
     except Exception as e:  # pylint: disable=broad-exception-caught
       logger.debug('Could not set job group in pre-run: %s', e)
 
