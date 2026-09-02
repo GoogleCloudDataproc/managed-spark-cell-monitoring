@@ -1,0 +1,20 @@
+/* Default colors for task chart graphs in light and dark themes */
+:root {
+  --cellmonitor-running-tasks: #6dd58c;
+  --cellmonitor-running-tasks-fill: rgba(109, 213, 140, 0.3);
+  --cellmonitor-scheduled-tasks: #ffb74d;
+  --cellmonitor-scheduled-tasks-fill: rgba(255, 183, 77, 0.5);
+  --cellmonitor-executor-cores: #6991d6;
+  --cellmonitor-job-marker: #4cb5ae;
+  --cellmonitor-bg-light: #fafafa;
+  --cellmonitor-bg-dark: #303030;
+  --cellmonitor-grid-dark: rgba(225, 227, 225, 0.3);
+  --cellmonitor-text-light: #000;
+  --cellmonitor-text-dark: #e1e3e1;
+}
+[data-jp-theme-light='false']:root {
+  --cellmonitor-bg-light: #303030;
+  --cellmonitor-bg-dark: #303030;
+  --cellmonitor-text-light: #e1e3e1;
+  --cellmonitor-text-dark: #e1e3e1;
+}

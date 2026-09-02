@@ -55,5 +55,10 @@ project/project/
 .DS_Store
 .idea/
 .vscode/
+.history/
+agent-assets/
 *.swp
 *.swo
+
+# Jest Coverage
+coverage/
