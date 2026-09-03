@@ -52,7 +52,7 @@ const Timeline = observer(() => {
     });
     job.uniqueStageIds.forEach((uniqueStageId) => {
       const stage = notebook.stages[uniqueStageId];
-      if (stage.submissionTime) {
+      if (stage && stage.submissionTime) {
         timelineData.push({
           id: stage.uniqueId,
           start: stage.submissionTime,
@@ -66,29 +66,41 @@ const Timeline = observer(() => {
     });
   });
 
-  const timelineGroups = new DataSet([
-    {
-      id: 'jobs',
-      content: 'Jobs',
-      className: 'visjobgroup',
-    },
-    {id: 'stages', content: 'Stages'},
-  ]);
+  const timelineGroups = React.useMemo(
+    () =>
+      new DataSet([
+        {
+          id: 'jobs',
+          content: 'Jobs',
+          className: 'visjobgroup',
+        },
+        {id: 'stages', content: 'Stages'},
+      ]),
+    [],
+  );
+
+  const timelineRef = React.useRef<VisTimeline | null>(null);
 
   React.useEffect(() => {
     if (!timelineDiv.current) {
       return;
     }
-    const timeline = new VisTimeline(
+    timelineRef.current = new VisTimeline(
       timelineDiv.current,
       timelineData,
       timelineGroups,
       timelineOptions,
     );
     return () => {
-      timeline.destroy();
+      timelineRef.current?.destroy();
     };
-  });
+  }, []);
+
+  React.useEffect(() => {
+    if (timelineRef.current) {
+      timelineRef.current.setItems(timelineData);
+    }
+  }, [timelineData]);
   return (
     <ErrorBoundary>
       <div className="tabcontent">

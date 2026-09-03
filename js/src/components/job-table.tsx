@@ -15,6 +15,9 @@ import {ProgressBar} from './progress-bar';
 const StageItem = observer((props: {stageId: string}) => {
   const notebook = useNotebookStore();
   const stage = notebook.stages[props.stageId];
+  if (!stage) {
+    return null;
+  }
   return (
     <tr className="stagerow">
       <td className="tdstageid">{stage.stageId}</td>
@@ -80,7 +83,9 @@ const JobItem = observer((props: {jobId: string}) => {
   const onClickCollapseStageTable = () => {
     setStageTableCollapsed((value) => !value);
   };
-
+  if (!job) {
+    return null;
+  }
   return (
     <>
       <tr className="jobrow">

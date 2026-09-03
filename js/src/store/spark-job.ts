@@ -29,26 +29,26 @@ export class SparkJob {
   cell?: Cell;
 
   get numActiveStages() {
-    return this.uniqueStageIds.filter(stageId => {
-      return this.notebookStore.stages[stageId].status === 'PENDING';
+    return this.uniqueStageIds.filter((stageId) => {
+      return this.notebookStore.stages[stageId]?.status === 'PENDING';
     }).length;
   }
 
   get numCompletedStages() {
-    return this.uniqueStageIds.filter(stageId => {
-      return this.notebookStore.stages[stageId].status === 'COMPLETED';
+    return this.uniqueStageIds.filter((stageId) => {
+      return this.notebookStore.stages[stageId]?.status === 'COMPLETED';
     }).length;
   }
 
   get numFailedStages() {
-    return this.uniqueStageIds.filter(stageId => {
-      return this.notebookStore.stages[stageId].status === 'FAILED';
+    return this.uniqueStageIds.filter((stageId) => {
+      return this.notebookStore.stages[stageId]?.status === 'FAILED';
     }).length;
   }
 
   get numSkippedStages() {
-    return this.uniqueStageIds.filter(stageId => {
-      return this.notebookStore.stages[stageId].status === 'SKIPPED';
+    return this.uniqueStageIds.filter((stageId) => {
+      return this.notebookStore.stages[stageId]?.status === 'SKIPPED';
     }).length;
   }
 

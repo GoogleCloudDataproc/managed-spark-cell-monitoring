@@ -52,7 +52,9 @@ export class Cell {
   }
 
   get jobs() {
-    return this.uniqueJobIds.map(id => this.notebookStore.jobs[id]);
+    return this.uniqueJobIds
+      .map((id) => this.notebookStore.jobs[id])
+      .filter((job): job is NonNullable<typeof job> => !!job);
   }
 
   get numActiveJobs() {

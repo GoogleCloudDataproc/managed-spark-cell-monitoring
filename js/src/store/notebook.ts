@@ -129,8 +129,9 @@ export class NotebookStore {
     );
 
     if (job.name === 'null' && data.stageIds.length > 0) {
-      const lastStageId = Math.max.apply(null, data.stageIds);
-      job.name = this.stages[`${this.uniqueId}-stage-${lastStageId}`]?.name || 'Job';
+      const lastStageId = Math.max(...data.stageIds.map(Number));
+      job.name =
+        this.stages[`${this.uniqueId}-stage-${lastStageId}`]?.name || 'Job';
     }
 
     if (!this.cells[cellId]) {
@@ -234,33 +235,33 @@ export class NotebookStore {
         data.status === 'SKIPPED' ? 0 : data.numCompletedTasks;
     stage.numFailedTasks = data.numFailedTasks;
 
-      const job = this.jobs[stage.uniqueJobId];
-      if (job) {
-        job.numActiveTasks = 0;
-        job.numCompletedTasks = 0;
-        job.numFailedTasks = 0;
-        job.numTasks = 0;
+    const job = this.jobs[stage.uniqueJobId];
+    if (job) {
+      job.numActiveTasks = 0;
+      job.numCompletedTasks = 0;
+      job.numFailedTasks = 0;
+      job.numTasks = 0;
 
-        // Update active/completed/failed tasks number (scan all job stages tasks stats)
-        job.uniqueStageIds.forEach(uniqueStageId => {
-          const s = this.stages[uniqueStageId];
-          if (s) {
-            job.numActiveTasks += s.numActiveTasks || 0;
-            job.numFailedTasks += s.numFailedTasks || 0;
-            job.numTasks += s.numTasks || 0;
-            if (s.status === 'SKIPPED') {
-              job.numCompletedTasks += s.numTasks || 0;
-            } else {
-              job.numCompletedTasks += s.numCompletedTasks || 0;
-            }
+      // Update active/completed/failed tasks number (scan all job stages tasks stats)
+      job.uniqueStageIds.forEach((uniqueStageId) => {
+        const s = this.stages[uniqueStageId];
+        if (s) {
+          job.numActiveTasks += s.numActiveTasks || 0;
+          job.numFailedTasks += s.numFailedTasks || 0;
+          job.numTasks += s.numTasks || 0;
+          if (s.status === 'SKIPPED') {
+            job.numCompletedTasks += s.numTasks || 0;
+          } else {
+            job.numCompletedTasks += s.numCompletedTasks || 0;
           }
-        });
+        }
+      });
 
-        // Fix the Cliff: forcefully plot the final active tasks count (should
-        // be 0 for this stage)
-        const time = data.completionTime || Date.now();
-        job.cell?.taskChartStore.onSparkStageActive(time, job.numActiveTasks);
-      }
+      // Fix the Cliff: forcefully plot the final active tasks count (should
+      // be 0 for this stage)
+      const time = data.completionTime || Date.now();
+      job.cell?.taskChartStore.onSparkStageActive(time, job.numActiveTasks);
+    }
   }
 
   onSparkExecutorAdded(data: any) {
