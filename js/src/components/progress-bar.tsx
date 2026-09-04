@@ -15,8 +15,6 @@
  * limitations under the License.
  */
 
-import React from 'react';
-
 export const ProgressBar = (props: {
   total?: number;
   running?: number;
@@ -51,8 +49,8 @@ export const ProgressBar = (props: {
           }}></span>
       </div>
       <div className="data">
-        {props.completed}/{props.total}
-        {props.running > 0 ? ` (${props.running})` : ''}
+        {props.completed ?? 0}/{props.total ?? 0}
+        {running > 0 ? ` (${running})` : ''}
       </div>
     </div>
   );

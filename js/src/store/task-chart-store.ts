@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-import { NotebookStore } from './notebook';
+import type { NotebookStore } from './notebook';
 
 export class TaskChartStore {
   jobDataX: Array<number> = [];

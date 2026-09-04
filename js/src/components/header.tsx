@@ -16,7 +16,6 @@
  */
 
 import {observer} from 'mobx-react-lite';
-import React from 'react';
 import {useCellStore, useNotebookStore} from '../store';
 
 export const CellMonitorHeader = observer(() => {

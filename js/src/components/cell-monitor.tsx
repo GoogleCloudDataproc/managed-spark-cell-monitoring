@@ -16,8 +16,6 @@
  */
 
 import {observer} from 'mobx-react-lite';
-import React from 'react';
-
 import {useCellStore, useNotebookStore} from '../store';
 import {CellMonitorHeader} from './header';
 import {JobTable} from './job-table';

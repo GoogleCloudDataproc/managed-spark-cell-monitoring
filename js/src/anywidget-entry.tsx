@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-import * as React from 'react';
 import {createRoot} from 'react-dom/client';
 import '../style/jobtable.css';
 import '../style/styles.css';
@@ -23,7 +22,7 @@ import '../style/task-chart.css';
 import {CellWidget} from './components';
 import {store} from './store';
 import {Cell} from './store/cell';
-import {NotebookStore} from './store/notebook';
+import type {NotebookStore} from './store/notebook';
 
 function routeSparkMessageToStore(
   msg: any,

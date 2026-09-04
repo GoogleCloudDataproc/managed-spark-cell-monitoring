@@ -16,8 +16,6 @@
  */
 
 import {observer} from 'mobx-react-lite';
-import React from 'react';
-
 import {CellStoreContext, NotebookStoreContext, store} from '../store';
 import {CellMonitor} from './cell-monitor';
 
