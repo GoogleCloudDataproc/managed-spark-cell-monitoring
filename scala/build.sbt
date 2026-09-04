@@ -21,8 +21,7 @@ lazy val commonSettings = Seq(
   organization := "com.google.cloud.dataproc",
   version := "1.0.0",
   Compile / unmanagedSourceDirectories += (ThisBuild / baseDirectory).value / "core" / "src" / "main" / "scala",
-  Test / unmanagedSourceDirectories += (ThisBuild / baseDirectory).value / "core" / "src" / "test" / "scala",
-  assembly / assemblyOutputPath := (ThisBuild / baseDirectory).value / ".." / "managed_spark_cell_monitoring" / "static" / "listeners" / s"${name.value}-assembly-${version.value}.jar"
+  Test / unmanagedSourceDirectories += (ThisBuild / baseDirectory).value / "core" / "src" / "test" / "scala"
 )
 
 lazy val spark3 = (project in file("spark-3"))

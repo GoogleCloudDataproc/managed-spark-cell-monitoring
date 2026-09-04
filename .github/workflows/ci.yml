@@ -85,6 +85,9 @@ jobs:
         run: |
           cd scala
           sbt assembly
+          mkdir -p ../managed_spark_cell_monitoring/static/listeners
+          cp spark-3/target/scala-2.12/managed-spark-cell-monitoring-spark3-assembly-*.jar ../managed_spark_cell_monitoring/static/listeners/
+          cp spark-4/target/scala-2.13/managed-spark-cell-monitoring-spark4-assembly-*.jar ../managed_spark_cell_monitoring/static/listeners/
 
       - name: Upload listener fat JARs
         uses: actions/upload-artifact@v4
