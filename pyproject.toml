@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "managed-spark-cell-monitoring"
+version = "1.0.0"
+description = "Real-time cell monitoring and event visualization for Apache Spark in Jupyter notebooks."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.8"
+authors = [
+    { name = "Google LLC" }
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: IPython",
+    "Framework :: Jupyter",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+    "anywidget>=0.9.0",
+    "ipython>=7.0.0",
+    "ipykernel>=5.0.0",
+    "traitlets>=5.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["managed_spark_cell_monitoring"]
+artifacts = [
+    "managed_spark_cell_monitoring/static/*",
+    "managed_spark_cell_monitoring/static/**/*",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/managed_spark_cell_monitoring",
+    "/js",
+    "/scala",
+    "README.md",
+    "LICENSE",
+]

@@ -62,3 +62,7 @@ agent-assets/
 
 # Jest Coverage
 coverage/
+
+# Built Static Assets & Bundles
+managed_spark_cell_monitoring/static/
+test_venv/
