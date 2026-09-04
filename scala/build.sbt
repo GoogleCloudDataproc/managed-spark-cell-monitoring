@@ -19,29 +19,18 @@ lazy val sharedShadeRules = Seq(
 
 lazy val commonSettings = Seq(
   organization := "com.google.cloud.dataproc",
-  version := "1.0.0"
+  version := "1.0.0",
+  Compile / unmanagedSourceDirectories += (ThisBuild / baseDirectory).value / "core" / "src" / "main" / "scala",
+  Test / unmanagedSourceDirectories += (ThisBuild / baseDirectory).value / "core" / "src" / "test" / "scala",
+  assembly / assemblyOutputPath := (ThisBuild / baseDirectory).value / ".." / "managed_spark_cell_monitoring" / "static" / "listeners" / s"${name.value}-assembly-${version.value}.jar"
 )
 
-lazy val core = (project in file("core"))
-  .settings(
-    commonSettings,
-    scalaVersion := "2.12.18",
-    crossScalaVersions := Seq("2.12.18", "2.13.11"),
-    libraryDependencies ++= Seq(
-      "org.scalatest" %% "scalatest" % "3.2.16" % Test,
-      "org.apache.spark" %% "spark-core" % "3.4.1" % "provided",
-      "org.json4s" %% "json4s-jackson" % "3.7.0-M11"
-    ),
-    assembly / assemblyShadeRules := sharedShadeRules
-  )
-
 lazy val spark3 = (project in file("spark-3"))
-  .dependsOn(core)
   .settings(
     commonSettings,
+    name := "managed-spark-cell-monitoring-spark3",
     scalaVersion := "2.12.18",
     crossScalaVersions := Seq("2.12.18"),
-    name := "managed-spark-cell-monitoring-spark3",
     libraryDependencies ++= Seq(
       "org.scalatest" %% "scalatest" % "3.2.16" % Test,
       "org.apache.spark" %% "spark-core" % "3.4.1" % "provided",
@@ -51,18 +40,24 @@ lazy val spark3 = (project in file("spark-3"))
   )
 
 lazy val spark4 = (project in file("spark-4"))
-  .dependsOn(core)
   .settings(
     commonSettings,
+    name := "managed-spark-cell-monitoring-spark4",
     scalaVersion := "2.13.11",
     crossScalaVersions := Seq("2.13.11"),
-    name := "managed-spark-cell-monitoring-spark4",
     libraryDependencies ++= Seq(
       "org.scalatest" %% "scalatest" % "3.2.16" % Test,
       "org.apache.spark" %% "spark-core" % "4.0.0-preview1" % "provided",
       "org.json4s" %% "json4s-jackson" % "3.7.0-M11"
     ),
     assembly / assemblyShadeRules := sharedShadeRules
+  )
+
+lazy val root = (project in file("."))
+  .aggregate(spark3, spark4)
+  .settings(
+    publish / skip := true,
+    assembly / skip := true
   )
 
 ThisBuild / assemblyMergeStrategy := {
