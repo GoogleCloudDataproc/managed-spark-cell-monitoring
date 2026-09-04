@@ -22,22 +22,26 @@
   border: none;
 }
 
-/* :root {
+:root {
+  /* Default light mode values */
   --cellmonitor-bg-primary: #ffffff;
   --cellmonitor-bg-secondary: #f0f4f9;
   --cellmonitor-bg-tertiary: #dde3ea;
   --cellmonitor-bg-quaternary: #fafafa;
   --cellmonitor-title-bg: #e9eef6;
-} */
+  --cellmonitor-text: #000000;
+}
 
-:root {
-  /* Tries VS Code's editor background first, then Jupyter's, then falls back to your custom white */
-  --cellmonitor-bg-primary: var(--vscode-editor-background, var(--jp-layout-color0, #FFFFFF));
-  --cellmonitor-bg-secondary: var(--vscode-editorWidget-background, var(--jp-layout-color2, #F0F4F9));
-  --cellmonitor-bg-tertiary: var(--vscode-dropdown-background, var(--jp-layout-color3, #DDE3EA));
-  --cellmonitor-bg-quaternary: var(--vscode-badge-background, var(--jp-layout-color4, #FAFAFA));
-  --cellmonitor-title-bg: var(--vscode-sideBar-background, var(--jp-layout-color1, #E9EEF6));
-  --cellmonitor-text: var(--vscode-editor-foreground, var(--jp-ui-font-color1, #000000));
+/* Explicit fallback overrides for Dark Mode */
+[data-jp-theme-light='false'],
+.vscode-dark,
+.vscode-high-contrast {
+  --cellmonitor-bg-primary: #000000;
+  --cellmonitor-bg-secondary: #444746;
+  --cellmonitor-bg-tertiary: #303030;
+  --cellmonitor-bg-quaternary: #303030;
+  --cellmonitor-title-bg: #747775;
+  --cellmonitor-text: #ffffff;
 }
 
 /* --------------Title Bar-------------------- */
@@ -325,16 +329,4 @@ g.legend g.traces:hover .legendtext text {
 .vscode-high-contrast .js-plotly-plot .xaxislayer-above .xgrid,
 .vscode-high-contrast .js-plotly-plot .yaxislayer-above .ygrid {
   stroke: #e1e3e1 !important;
-}
-
-/* Universal Dark Mode Fallback for Editors that use class triggers */
-[data-jp-theme-light="false"],
-.vscode-dark,
-.vscode-high-contrast {
-  --cellmonitor-bg-primary: #000000; 
-  --cellmonitor-bg-secondary: #444746; 
-  --cellmonitor-bg-tertiary: #303030; 
-  --cellmonitor-bg-quaternary: #303030; 
-  --cellmonitor-title-bg: #747775; 
-  --cellmonitor-text: #FFFFFF;
 }

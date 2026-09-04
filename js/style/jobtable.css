@@ -108,8 +108,8 @@
 }
 
 .pm tr .tdstagebutton:hover ~ td,
-tr .tdstagebutton:hover {
-  background-color: var(--jp-layout-color2);
+.pm tr .tdstagebutton:hover {
+  background-color: var(--cellmonitor-bg-secondary, #f0f4f9);
 }
 
 .pm th.thbutton {
