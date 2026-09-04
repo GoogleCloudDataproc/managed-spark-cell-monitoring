@@ -16,9 +16,8 @@ name: CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "pr*" ]
   pull_request:
-    branches: [ "main" ]
 
 permissions:
   contents: read

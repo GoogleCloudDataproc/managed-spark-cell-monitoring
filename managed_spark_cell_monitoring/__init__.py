@@ -28,7 +28,7 @@ def get_jar_path(spark_version: str = "3") -> str:
     Absolute path to the listener JAR file as a string.
   """
   listeners_dir = pathlib.Path(__file__).parent / "static" / "listeners"
-  target_name = f"managed-spark-cell-monitoring-spark{spark_version}-assembly-1.0.0.jar"
+  target_name = f"managed-spark-cell-monitoring-spark{spark_version}-assembly-{__version__}.jar"
   target_path = listeners_dir / target_name
   if target_path.exists():
     return str(target_path)

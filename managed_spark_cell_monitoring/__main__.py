@@ -19,6 +19,9 @@ from managed_spark_cell_monitoring import get_jar_path, __version__
 
 
 def main():
+  if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
+    print("Usage: python -m managed_spark_cell_monitoring [3|4]")
+    sys.exit(0)
   spark_version = sys.argv[1] if len(sys.argv) > 1 else "3"
   jar = get_jar_path(spark_version)
   print(f"Managed Spark Cell Monitoring v{__version__}")
