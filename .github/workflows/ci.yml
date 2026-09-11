@@ -102,7 +102,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
 
     steps:
       - name: Checkout repository
@@ -141,9 +141,8 @@ jobs:
       - name: Validate distribution metadata
         run: twine check dist/*
 
-      - name: Verify clean wheel installation and CLI discovery
+      - name: Verify clean wheel installation and JAR discovery
         run: |
           python -m venv test_venv
           ./test_venv/bin/pip install dist/*.whl
-          ./test_venv/bin/python -m managed_spark_cell_monitoring 3
-          ./test_venv/bin/python -m managed_spark_cell_monitoring 4
+          ./test_venv/bin/python -c "import managed_spark_cell_monitoring as m; print(m.get_jar_path('3')); print(m.get_jar_path('4'))"

@@ -43,21 +43,19 @@ In your IPython environment or notebook cell, load the kernel extension:
 Alternatively, configure it to load automatically in all notebook sessions by adding it to your IPython configuration (e.g. `~/.ipython/profile_default/ipython_kernel_config.py`):
 
 ```python
-c.InteractiveShellApp.extensions.append(
-    'managed_spark_cell_monitoring.kernelextension'
-)
+c.InteractiveShellApp.extensions.append('managed_spark_cell_monitoring')
 ```
 
 ### 3. Configure PySpark Session
 
-Create your Spark session with the extra configurations to activate the Scala Listener. Use `managed_spark_cell_monitoring.get_jar_path(...)` to automatically resolve the bundled listener JAR. Pass `"3"` for Apache Spark 3.x or `"4"` for Apache Spark 4.x:
+Create your Spark session with the extra configurations to activate the Scala Listener. Use `managed_spark_cell_monitoring.get_jar_path(...)` to automatically resolve the bundled listener JAR. Pass `"3"` for Apache Spark 3.5+ or `"4"` for Apache Spark 4.x:
 
 ```python
 import managed_spark_cell_monitoring
 from pyspark.sql import SparkSession
 
 # Specify your target major Apache Spark version:
-# • Pass "3" for Apache Spark 3.x (e.g., Spark 3.4 / 3.5 on Google Cloud Dataproc 2.2)
+# • Pass "3" for Apache Spark 3.5+ (e.g., Google Cloud Dataproc 2.2)
 # • Pass "4" for Apache Spark 4.x
 spark_major_version = "3"  # Change to "4" for Spark 4.x clusters
 
@@ -75,25 +73,6 @@ spark = (
 )
 ```
 
-### 4. Cluster / Dataproc Configuration (`spark-defaults.conf`)
-
-For Dataproc initialization actions, cluster startup scripts, or `spark-defaults.conf`, you can use the CLI entrypoint to print the exact configuration:
-
-* **For Spark 3.x:**
-  ```bash
-  python -m managed_spark_cell_monitoring 3
-  ```
-* **For Spark 4.x:**
-  ```bash
-  python -m managed_spark_cell_monitoring 4
-  ```
-
-This outputs:
-```properties
-spark.extraListeners managed_spark_cell_monitoring.listener.JupyterManagedSparkCellMonitoringListener
-spark.driver.extraClassPath /path/to/managed-spark-cell-monitoring-spark3-assembly-1.0.0.jar
-```
-
 ---
 
 ## Development & Building
@@ -101,7 +80,7 @@ spark.driver.extraClassPath /path/to/managed-spark-cell-monitoring-spark3-assemb
 ### Prerequisites
 - **Node.js** (>= 18.0) & **Yarn**
 - **Java JDK** (8, 11, or 17) & **SBT**
-- **Python** (>= 3.9)
+- **Python** (>= 3.8)
 
 ### Building from Source
 

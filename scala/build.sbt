@@ -19,7 +19,7 @@ lazy val sharedShadeRules = Seq(
 
 lazy val commonSettings = Seq(
   organization := "com.google.cloud.dataproc",
-  version := "1.0.0",
+  version := "0.1.0",
   Compile / unmanagedSourceDirectories += (ThisBuild / baseDirectory).value / "core" / "src" / "main" / "scala",
   Test / unmanagedSourceDirectories += (ThisBuild / baseDirectory).value / "core" / "src" / "test" / "scala"
 )
