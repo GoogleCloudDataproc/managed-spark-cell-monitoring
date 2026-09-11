@@ -1,4 +1,5 @@
-/*
+/**
+ * @license
  * Copyright 2026 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,7 +23,7 @@ import '../style/task-chart.css';
 import {CellWidget} from './components';
 import {store} from './store';
 import {Cell} from './store/cell';
-import type {NotebookStore} from './store/notebook';
+import {NotebookStore} from './store/notebook';
 
 function routeSparkMessageToStore(
   msg: any,
