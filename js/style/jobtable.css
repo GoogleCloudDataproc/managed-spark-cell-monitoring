@@ -1,0 +1,309 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+.pm .tdstageicon {
+  display: block;
+  width: 12px;
+  height: 12px;
+  position: relative;
+  top: -2px;
+  transition: transform 0.3s ease;
+  transform: rotate(0deg);
+  background-image: url('./icons/dropdown-icon.svg');
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  margin-left: 8px;
+}
+.pm .tdstagebutton {
+  cursor: pointer;
+  background-color: transparent;
+}
+.pm .tdstageiconcollapsed {
+  transform: rotate(90deg);
+}
+
+.pm th {
+  background-color: var(--cellmonitor-bg-quaternary, #fafafa);
+  border-top: 1px solid #eeeeee;
+  border-bottom: 2px solid #eeeeee;
+  border-left: none;
+  border-right: none;
+  color: inherit;
+  font-weight: 500;
+  white-space: nowrap;
+  font-size: 13px;
+  font-family: 'Roboto', sans-serif;
+  height: 15px;
+  line-height: 15px;
+  padding: 8px 12px;
+}
+.pm td {
+  background-color: #ffffff;
+  border-top: 1px solid #e8eaed;
+  border-bottom: 1px solid #e8eaed;
+  border-left: none;
+  border-right: none;
+  font-size: 12px;
+  font-weight: 400;
+}
+.pm td.tdstagebutton {
+  background-color: inherit;
+}
+
+.pm .jobrow > td {
+  background-color: var(--cellmonitor-bg-primary, #ffffff) !important;
+  text-align: center;
+  vertical-align: middle;
+  height: 30px;
+  line-height: 30px;
+  padding: 8px 6px;
+}
+.pm .jobstagedatarow > td {
+  background-color: var(--cellmonitor-bg-secondary, #f0f4f9);
+  padding: 8px;
+}
+.pm .stagerow > td {
+  background-color: var(--cellmonitor-bg-primary, #ffffff) !important;
+  text-align: center;
+  vertical-align: middle;
+  height: 28px;
+  line-height: 28px;
+  padding: 6px 4px;
+  border-bottom: 2px solid #eeeeee;
+  font-size: 12px;
+  font-family: 'Roboto', sans-serif;
+}
+.pm table {
+  border-radius: 0;
+  width: 100%;
+  border-spacing: 0;
+}
+.pm tbody {
+  overflow: auto;
+}
+.pm tr {
+  border: 0;
+}
+.pm td,
+.pm th {
+  text-align: center;
+  vertical-align: middle;
+  height: 25px;
+  line-height: 25px;
+}
+
+.pm tr .tdstagebutton:hover ~ td,
+.pm tr .tdstagebutton:hover {
+  background-color: var(--cellmonitor-bg-secondary, #f0f4f9);
+}
+
+.pm th.thbutton {
+  width: 4%;
+}
+.pm th.thjobid {
+  width: 6%;
+}
+.pm th.thjobname {
+  width: 10%;
+  white-space: nowrap;
+}
+.pm th.thjobstatus {
+  width: 12%;
+}
+.pm th.thjobtages {
+  width: 10%;
+}
+.pm th.thjobtasks {
+  width: 28%;
+}
+.pm th.thjobstart {
+  width: 20%;
+}
+.pm th.thjobtime {
+  width: 10%;
+}
+.pm th.thstageid {
+  width: 8%;
+}
+.pm th.thstagename {
+  width: 10%;
+  white-space: nowrap;
+}
+.pm th.thstagestatus {
+  width: 17%;
+}
+.pm th.thstagetasks {
+  width: 33%;
+}
+.pm th.thstagestart {
+  width: 20%;
+}
+.pm th.thstageduration {
+  width: 12%;
+}
+
+progress {
+  padding: 2px;
+}
+.pm .tdstatus {
+  padding: 2px;
+}
+.pm .running {
+  background-color: #6991d6;
+}
+.pm .failed {
+  background-color: #db3636;
+}
+.pm .completed {
+  background-color: #6dd58c;
+}
+.pm .pending {
+  background-color: #9c27b0;
+}
+.pm .skipped {
+  background-color: #616161;
+}
+
+.pm .completed,
+.pm .failed,
+.pm .running,
+.pm .pending,
+.pm .skipped {
+  font-size: 75%;
+  color: white;
+  border-radius: 2px;
+}
+.pm .tdstagestatus > span,
+.pm .tdjobstatus > span {
+  padding: 4px 8px;
+}
+.pm .stagetable tr th {
+  background-color: var(--cellmonitor-bg-tertiary, #dde3ea);
+  border-top: 1px solid #eeeeee;
+  border-bottom: 2px solid #eeeeee;
+  font-weight: 500;
+  font-size: 13px;
+  font-family: 'Roboto', sans-serif;
+  height: 26px;
+  line-height: 26px;
+  padding: 6px 8px;
+}
+.pm .cssprogress-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.pm .cssprogress {
+  display: flex;
+  background: var(--cellmonitor-bg-tertiary, #dde3ea);
+  border-radius: 3px;
+  flex: 1;
+  height: 8px;
+  padding: 0;
+  overflow: hidden;
+  position: relative;
+}
+.pm .cssprogress .data {
+  flex-shrink: 0;
+  font-size: 75%;
+  color: #333;
+  white-space: nowrap;
+  line-height: 1;
+}
+.pm .cssprogress-container .data {
+  flex-shrink: 0;
+  font-size: small;
+  color: #333;
+  white-space: nowrap;
+  line-height: 1;
+}
+.pm .cssprogress .val1 {
+  width: 0%;
+  height: 100%;
+  background: #6dd58c;
+  flex-shrink: 0;
+}
+.pm .cssprogress .val2 {
+  width: 0%;
+  height: 100%;
+  background: #6991d6;
+  flex-shrink: 0;
+}
+.pm .cssprogress span {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  transition: width 1s;
+}
+
+/* Consolidated Dark Theme Priorities */
+[data-jp-theme-light='false'] .pm th,
+.vscode-dark .pm th,
+.vscode-high-contrast .pm th {
+  background-color: var(--cellmonitor-bg-quaternary, #303030);
+  border-top: 1px solid #444746;
+  border-bottom: 1px solid #444746;
+  color: #e1e3e1;
+}
+[data-jp-theme-light='false'] .pm td,
+.vscode-dark .pm td,
+.vscode-high-contrast .pm td {
+  background-color: var(--cellmonitor-bg-primary, #000000);
+  border-top: 1px solid #444746;
+  border-bottom: 1px solid #444746;
+  color: #e1e3e1;
+}
+
+[data-jp-theme-light='false'] .pm .jobrow > td,
+[data-jp-theme-light='false'] .pm .stagerow > td,
+.vscode-dark .pm .jobrow > td,
+.vscode-dark .pm .stagerow > td,
+.vscode-high-contrast .pm .jobrow > td,
+.vscode-high-contrast .pm .stagerow > td {
+  background-color: var(--cellmonitor-bg-primary, #000000) !important;
+  border-top: 1px solid #444746;
+  border-bottom: 1px solid #444746;
+}
+[data-jp-theme-light='false'] .pm .jobstagedatarow > td,
+.vscode-dark .pm .jobstagedatarow > td,
+.vscode-high-contrast .pm .jobstagedatarow > td {
+  background-color: var(--cellmonitor-bg-secondary, #444746);
+}
+[data-jp-theme-light='false'] .pm .stagetable tr th,
+.vscode-dark .pm .stagetable tr th,
+.vscode-high-contrast .pm .stagetable tr th {
+  background-color: var(--cellmonitor-bg-tertiary, #303030);
+  border-top: 1px solid #444746;
+  border-bottom: 1px solid #444746;
+  color: #e1e3e1;
+}
+[data-jp-theme-light='false'] .pm .tdstageicon,
+.vscode-dark .pm .tdstageicon,
+.vscode-high-contrast .pm .tdstageicon {
+  filter: brightness(0) saturate(100%) invert(87%) sepia(4%) saturate(309%) hue-rotate(75deg)
+    brightness(98%) contrast(97%);
+}
+[data-jp-theme-light='false'] .pm .cssprogress-container .data,
+[data-jp-theme-light='false'] .pm .cssprogress .data,
+.vscode-dark .pm .cssprogress-container .data,
+.vscode-dark .pm .cssprogress .data,
+.vscode-high-contrast .pm .cssprogress-container .data,
+.vscode-high-contrast .pm .cssprogress .data {
+  color: #e1e3e1;
+}

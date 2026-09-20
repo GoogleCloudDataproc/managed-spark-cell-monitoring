@@ -1,0 +1,332 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+.pm {
+  background-color: #f7f7f7;
+  margin: 8px 0;
+  font-family: 'Roboto', sans-serif;
+  border: none;
+}
+
+:root {
+  /* Default light mode values */
+  --cellmonitor-bg-primary: #ffffff;
+  --cellmonitor-bg-secondary: #f0f4f9;
+  --cellmonitor-bg-tertiary: #dde3ea;
+  --cellmonitor-bg-quaternary: #fafafa;
+  --cellmonitor-title-bg: #e9eef6;
+  --cellmonitor-text: #000000;
+}
+
+/* Explicit fallback overrides for Dark Mode */
+[data-jp-theme-light='false'],
+.vscode-dark,
+.vscode-high-contrast {
+  --cellmonitor-bg-primary: #000000;
+  --cellmonitor-bg-secondary: #444746;
+  --cellmonitor-bg-tertiary: #303030;
+  --cellmonitor-bg-quaternary: #303030;
+  --cellmonitor-title-bg: #747775;
+  --cellmonitor-text: #ffffff;
+}
+
+/* --------------Title Bar-------------------- */
+.pm .title {
+  background-color: var(--cellmonitor-title-bg, #e9eef6);
+  color: #333;
+  display: flex;
+  flex-flow: row wrap;
+  justify-content: flex-end;
+  padding: 8px;
+  align-items: center;
+  align-self: stretch;
+}
+.pm .titleright {
+  display: flex;
+  align-items: stretch;
+  height: 30px;
+}
+.pm .titleleft {
+  flex-grow: 1;
+  height: 30px;
+  cursor: pointer;
+}
+.pm .titleleft .tdstageicon {
+  display: table-cell;
+  vertical-align: middle;
+  width: 24px;
+  background-position: center;
+  background-size: 8px;
+  filter: none;
+  top: 0;
+}
+.pm .tbitem {
+  padding: 0 15px;
+  height: 30px;
+  text-align: center;
+  vertical-align: middle;
+  display: table-cell;
+}
+.pm .badgecontainer {
+  padding: 0 5px;
+  font-weight: 500;
+}
+.pm .titlecollapse:hover {
+  background-color: #c45917;
+}
+
+/* Badges */
+.pm .badges {
+  text-align: center;
+  margin-left: 8px;
+}
+.pm .badgesspan {
+  margin-left: 8px;
+}
+.pm .jobstag {
+  margin-left: 16px;
+}
+
+.badgerunning {
+  color: #1976d2;
+  background-color: #edeff3;
+  border: 1px solid #1976d2;
+  font-size: 100%;
+  padding: 0px 8px;
+  border-radius: 100px;
+  white-space: nowrap;
+  font-weight: 500;
+  margin: 0 2px;
+}
+.badgecompleted {
+  color: #188038;
+  background-color: #edeff3;
+  border: 1px solid #188038;
+  font-size: 100%;
+  padding: 0px 8px;
+  border-radius: 100px;
+  white-space: nowrap;
+  font-weight: 500;
+  margin: 0 2px;
+}
+.badgefailed {
+  color: #db3636;
+  background-color: #edeff3;
+  border: 1px solid #db3636;
+  font-size: 100%;
+  padding: 0px 8px;
+  border-radius: 100px;
+  white-space: nowrap;
+  font-weight: 500;
+  margin: 0 2px;
+}
+.badgeexecutor,
+.badgeexecutorcores {
+  font-size: 100%;
+  padding: 0px 8px;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 5px;
+  color: #202124;
+  border-radius: 100px;
+  border: 1px solid #c4c7c5;
+  background-color: #edeff3;
+  margin-right: 8px;
+}
+.badgeexecutorcores {
+  margin-left: 4px;
+}
+.uibuttondisabled {
+  color: #b2b2b2;
+}
+.pm .cancel:active {
+  font-size: larger;
+}
+
+/* Buttons */
+.pm .tabbutton {
+  display: inline-block;
+  width: 30px;
+  background-repeat: no-repeat;
+  background-position: center;
+  cursor: pointer;
+}
+.pm .timelinetabbuttonicon {
+  background-image: url('./icons/timeline-tab-icon.svg');
+}
+.pm .taskviewtabbuttonicon {
+  background-image: url('./icons/tasks-tab-icon.svg');
+}
+.pm .jobtabletabbuttonicon {
+  background-image: url('./icons/jobs-tab-icon.svg');
+}
+.pm .closebuttonicon {
+  background-size: 20px;
+  background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAQAAABKfvVzAAAAa0lEQVR4AeWSsREDIQwEtwlRhO3vP0JFPLgeHJDdnEfBh2y8F2hHnM5FJ1AayRtLshiE6F8WHUsw9kT0m8BDMFlMotZ10rzuaHtS63qo6s8HWkaLFXpo5ErXyKWukS25dRM5sXz+Pt+Ls/kBnolC6l7shJkAAAAASUVORK5CYII=');
+}
+.pm .closebutton {
+  padding: 5px;
+  border-left: 1px solid #c25e00;
+}
+.pm .tabbuttons {
+  display: flex;
+  align-items: stretch;
+}
+.pm .tabbutton:hover {
+  background-color: rgba(60, 64, 67, 0.04);
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition:
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+.pm .tabbutton:hover.tabbuttonactive {
+  background-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  filter: brightness(0) saturate(100%) invert(27%) sepia(96%) saturate(1458%) hue-rotate(213deg)
+    brightness(96%) contrast(91%);
+}
+.pm .cancelbutton:hover {
+  background-color: #c45917;
+}
+.pm .tabbuttonactive {
+  filter: brightness(0) saturate(100%) invert(27%) sepia(96%) saturate(1458%) hue-rotate(213deg)
+    brightness(96%) contrast(91%);
+}
+
+/* --------------Content-------------------- */
+.pm .tabcontent {
+  border: none;
+}
+.tabcontent {
+  padding: 8px;
+  background-color: var(--cellmonitor-bg-secondary, #f0f4f9);
+  box-sizing: border-box;
+}
+.tabcontent-inner {
+  background-color: var(--cellmonitor-bg-quaternary, #fafafa);
+  border-radius: 4px;
+  height: 100%;
+}
+.pm .taskcontainer {
+  user-select: none;
+}
+
+/* Consolidated Component/Plotly Dark Themes */
+[data-jp-theme-light='false'] .pm .title,
+.vscode-dark .pm .title,
+.vscode-high-contrast .pm .title {
+  background-color: #747775;
+  color: #e1e3e1;
+}
+[data-jp-theme-light='false'] .tabcontent,
+.vscode-dark .tabcontent,
+.vscode-high-contrast .tabcontent {
+  background-color: var(--cellmonitor-bg-secondary, #444746);
+}
+[data-jp-theme-light='false'] .tabcontent-inner,
+.vscode-dark .tabcontent-inner,
+.vscode-high-contrast .tabcontent-inner {
+  background-color: var(--cellmonitor-bg-quaternary, #303030);
+}
+
+/* -------------Task Chart--------------- */
+.legend .traces .legendtext {
+  transform: translateX(-5px);
+}
+.legend .traces .legendtext text {
+  transform: translateX(-3px);
+}
+.legend .traces .legendtoggle:hover,
+.legend .traces:hover .legendtoggle,
+g.legend g.traces:hover {
+  cursor: pointer;
+  opacity: 0.7;
+}
+.legend .traces .legendtoggle:hover .legendfill,
+.legend .traces .legendtoggle:hover .legendsymbols,
+.legend .traces:hover .legendfill,
+.legend .traces:hover .legendsymbols,
+g.legend g.traces:hover .legendfill,
+g.legend g.traces:hover .legendsymbols {
+  opacity: 0.7;
+  transform: scale(1.1);
+  transition: all 0.2s ease;
+}
+.legend .traces .legendtoggle:hover .legendtext,
+.legend .traces:hover .legendtext,
+g.legend g.traces:hover .legendtext {
+  fill: #000 !important;
+  font-weight: 600 !important;
+  transition: all 0.2s ease;
+}
+.legend .traces .legendtoggle:hover .legendtext text,
+.legend .traces:hover .legendtext text,
+g.legend g.traces:hover .legendtext text {
+  fill: #000 !important;
+  font-weight: 600 !important;
+  transition: all 0.2s ease;
+}
+.js-plotly-plot .annotation-text {
+  font-family: 'Roboto' !important;
+  font-weight: normal !important;
+  font-size: 12px !important;
+  fill: #000 !important;
+}
+
+[data-jp-theme-light='false'] .js-plotly-plot .plot-container .plotly,
+.vscode-dark .js-plotly-plot .plot-container .plotly,
+.vscode-high-contrast .js-plotly-plot .plot-container .plotly {
+  background-color: #303030 !important;
+}
+
+[data-jp-theme-light='false'] .js-plotly-plot .annotation-text,
+.vscode-dark .js-plotly-plot .annotation-text,
+.vscode-high-contrast .js-plotly-plot .annotation-text,
+[data-jp-theme-light='false'] .js-plotly-plot .xtick text,
+[data-jp-theme-light='false'] .js-plotly-plot .ytick text,
+[data-jp-theme-light='false'] .js-plotly-plot .g-xtitle text,
+[data-jp-theme-light='false'] .js-plotly-plot .g-ytitle text,
+[data-jp-theme-light='false'] .js-plotly-plot .g-gtitle text,
+.vscode-dark .js-plotly-plot .xtick text,
+.vscode-dark .js-plotly-plot .ytick text,
+.vscode-dark .js-plotly-plot .g-xtitle text,
+.vscode-dark .js-plotly-plot .g-ytitle text,
+.vscode-dark .js-plotly-plot .g-gtitle text,
+.vscode-high-contrast .js-plotly-plot .xtick text,
+.vscode-high-contrast .js-plotly-plot .ytick text,
+.vscode-high-contrast .js-plotly-plot .g-xtitle text,
+.vscode-high-contrast .js-plotly-plot .g-ytitle text,
+.vscode-high-contrast .js-plotly-plot .g-gtitle text {
+  fill: #e1e3e1 !important;
+}
+
+[data-jp-theme-light='false'] .js-plotly-plot .xaxislayer-above .xtick line,
+[data-jp-theme-light='false'] .js-plotly-plot .yaxislayer-above .ytick line,
+[data-jp-theme-light='false'] .js-plotly-plot .xaxislayer-above .xgrid,
+[data-jp-theme-light='false'] .js-plotly-plot .yaxislayer-above .ygrid,
+.vscode-dark .js-plotly-plot .xaxislayer-above .xtick line,
+.vscode-dark .js-plotly-plot .yaxislayer-above .ytick line,
+.vscode-dark .js-plotly-plot .xaxislayer-above .xgrid,
+.vscode-dark .js-plotly-plot .yaxislayer-above .ygrid,
+.vscode-high-contrast .js-plotly-plot .xaxislayer-above .xtick line,
+.vscode-high-contrast .js-plotly-plot .yaxislayer-above .ytick line,
+.vscode-high-contrast .js-plotly-plot .xaxislayer-above .xgrid,
+.vscode-high-contrast .js-plotly-plot .yaxislayer-above .ygrid {
+  stroke: #e1e3e1 !important;
+}
