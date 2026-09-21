@@ -27,7 +27,7 @@ def get_jar_path(spark_version: str = "3") -> str:
   """Returns the path to the bundled Scala listener JAR.
 
   Args:
-    spark_version: '3' for Spark 3.5+ or '4' for Spark 4.x.
+    spark_version: '3' for Spark 3.5 or '4' for Spark 4.x.
 
   Returns:
     Absolute path to the listener JAR file as a string.

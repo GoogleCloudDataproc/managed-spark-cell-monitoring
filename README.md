@@ -48,14 +48,14 @@ c.InteractiveShellApp.extensions.append('managed_spark_cell_monitoring')
 
 ### 3. Configure PySpark Session
 
-Create your Spark session with the extra configurations to activate the Scala Listener. Use `managed_spark_cell_monitoring.get_jar_path(...)` to automatically resolve the bundled listener JAR. Pass `"3"` for Apache Spark 3.5+ or `"4"` for Apache Spark 4.x:
+Create your Spark session with the extra configurations to activate the Scala Listener. Use `managed_spark_cell_monitoring.get_jar_path(...)` to automatically resolve the bundled listener JAR. Pass `"3"` for Apache Spark 3.5 or `"4"` for Apache Spark 4.x:
 
 ```python
 import managed_spark_cell_monitoring
 from pyspark.sql import SparkSession
 
 # Specify your target major Apache Spark version:
-# • Pass "3" for Apache Spark 3.5+ (e.g., Google Cloud Dataproc 2.2)
+# • Pass "3" for Apache Spark 3.5 (e.g., Google Cloud Dataproc 2.2)
 # • Pass "4" for Apache Spark 4.x
 spark_major_version = "3"  # Change to "4" for Spark 4.x clusters
 
