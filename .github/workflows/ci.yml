@@ -78,7 +78,7 @@ jobs:
           cache: 'sbt'
 
       - name: Setup SBT
-        uses: sbt/setup-sbt@cee6d9f81dbca69db8dad7a6ef83ce99cbd539f7 # v1
+        uses: sbt/setup-sbt@82da71df4e122282484a99a8d70096bc2369dbd8 # v1
 
       - name: Run Scala unit tests
         run: |
