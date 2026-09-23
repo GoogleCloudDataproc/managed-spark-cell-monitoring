@@ -38,4 +38,57 @@ def test_append_event_sends_sequence():
   event_payload = {"some": "data"}
   widget.append_event(event_payload, sequence=5)
 
-  widget.send.assert_called_once_with({"type": "spark_event", "data": {"some": "data"}, "sequence": 5})
+  widget.send.assert_called_once_with(
+      {"type": "spark_event", "data": {"some": "data"}, "sequence": 5}
+  )
+  assert len(widget.event_history) == 1
+  assert widget.event_history[0] == {"sequence": 5, "data": {"some": "data"}}
+
+
+def test_append_event_respects_max_history():
+  """Test that event_history is bounded by max_history_events."""
+  widget = ManagedSparkCellWidget(
+      run_id="run-1", session_id="sess-1", max_history_events=3
+  )
+  for i in range(1, 6):
+    widget.append_event({"event_id": i}, sequence=i)
+
+  assert len(widget.event_history) == 3
+  assert [item["sequence"] for item in widget.event_history] == [3, 4, 5]
+
+
+def test_handle_request_history():
+  """Test that request_history comm message returns matching replay_events."""
+  widget = ManagedSparkCellWidget(run_id="run-1", session_id="sess-1")
+  widget.send = mock.MagicMock()
+
+  for i in range(1, 6):
+    widget.append_event({"data": f"msg-{i}"}, sequence=i)
+
+  widget.send.reset_mock()
+
+  # Request range from 2 to 4
+  widget._handle_frontend_message(
+      widget, {"type": "request_history", "from_sequence": 2, "to_sequence": 4}
+  )
+
+  widget.send.assert_called_once_with({
+      "type": "replay_events",
+      "from_sequence": 2,
+      "events": [
+          {"sequence": 2, "data": {"data": "msg-2"}},
+          {"sequence": 3, "data": {"data": "msg-3"}},
+          {"sequence": 4, "data": {"data": "msg-4"}},
+      ],
+  })
+
+
+def test_cleanup_clears_history():
+  """Test that cleanup resets ACTIVE_WIDGET and clears event_history."""
+  widget = ManagedSparkCellWidget(run_id="run-1", session_id="sess-1")
+  widget.append_event({"test": 1}, sequence=1)
+  assert len(widget.event_history) == 1
+
+  widget.cleanup()
+  assert len(widget.event_history) == 0
+  assert widget_module.ACTIVE_WIDGET is None
