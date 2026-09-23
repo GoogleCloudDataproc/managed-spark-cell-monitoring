@@ -1,0 +1,154 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Frontend Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: 'yarn'
+          cache-dependency-path: './js/yarn.lock'
+
+      - name: Install dependencies
+        run: yarn --cwd js install --frozen-lockfile
+
+      - name: Lint frontend code
+        run: yarn --cwd js lint
+
+      - name: Run Jest test suite
+        run: yarn --cwd js test --coverage
+
+      - name: Build AnyWidget static assets
+        run: yarn --cwd js build
+
+      - name: Upload frontend static bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: frontend-static-bundle
+          path: |
+            managed_spark_cell_monitoring/static/widget.js
+            managed_spark_cell_monitoring/static/widget.css
+            managed_spark_cell_monitoring/static/widget.js.map
+            managed_spark_cell_monitoring/static/widget.css.map
+
+  scala:
+    name: Scala Listener Test & Assembly
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'sbt'
+
+      - name: Setup SBT
+        uses: sbt/setup-sbt@82da71df4e122282484a99a8d70096bc2369dbd8 # v1
+
+      - name: Run Scala unit tests
+        run: |
+          cd scala
+          sbt test
+
+      - name: Build Scala fat JAR assemblies
+        run: |
+          cd scala
+          sbt assembly
+          mkdir -p ../managed_spark_cell_monitoring/static/listeners
+          cp spark-3/target/scala-2.12/managed-spark-cell-monitoring-spark3-assembly-*.jar ../managed_spark_cell_monitoring/static/listeners/
+          cp spark-4/target/scala-2.13/managed-spark-cell-monitoring-spark4-assembly-*.jar ../managed_spark_cell_monitoring/static/listeners/
+
+      - name: Upload listener fat JARs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scala-listener-jars
+          path: managed_spark_cell_monitoring/static/listeners/*.jar
+
+  python:
+    name: Python Test & Wheel Validation (${{ matrix.python-version }})
+    needs: [frontend, scala]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Download frontend static bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: frontend-static-bundle
+          path: managed_spark_cell_monitoring/static/
+
+      - name: Download scala listener fat JARs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: scala-listener-jars
+          path: managed_spark_cell_monitoring/static/listeners/
+
+      - name: Install packaging tools
+        run: pip install --upgrade pip build twine
+
+      - name: Install package in editable mode
+        run: pip install -e ".[test]"
+
+      - name: Run Python unit tests
+        run: pytest tests/
+
+      - name: Build distribution packages (.whl and .tar.gz)
+        run: python -m build
+
+      - name: Validate distribution metadata
+        run: twine check dist/*
+
+      - name: Verify clean wheel installation and JAR discovery
+        run: |
+          python -m venv test_venv
+          ./test_venv/bin/pip install dist/*.whl
+          ./test_venv/bin/python -c "import managed_spark_cell_monitoring as m; print(m.get_jar_path('3')); print(m.get_jar_path('4'))"

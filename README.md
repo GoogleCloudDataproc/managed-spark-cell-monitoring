@@ -17,7 +17,7 @@ Leveraging [AnyWidget](https://anywidget.dev/), it enables platform-agnostic, ze
 ## Architecture Overview
 
 1. **Scala Listener (`scalalistener`):** Plugs into the Spark Driver's `SparkListener` bus to capture fine-grained task and stage metrics with lock-free queueing and delta-change metric caching.
-2. **Python Kernel Extension (`managed_spark_cell_monitoring.kernelextension`):** Intercepts cell execution hooks (`pre_run_cell`, `post_run_cell`) and routes telemetry events to active widget instances via Jupyter Comms or gRPC streams.
+2. **Python Kernel Extension (`managed_spark_cell_monitoring.kernelextension`):** Intercepts cell execution hooks (`pre_run_cell`, `post_run_cell`) and routes telemetry events to active widget instances via Jupyter Comms.
 3. **AnyWidget React Frontend (`managed_spark_cell_monitoring/static/widget.js`):** Modular React 18 / MobX frontend compiled via `esbuild`, providing isolated UI components for job tables, stage bars, and task timelines.
 
 ---
@@ -25,6 +25,8 @@ Leveraging [AnyWidget](https://anywidget.dev/), it enables platform-agnostic, ze
 ## Installation & Usage
 
 ### 1. Installation
+
+Install the pre-built package from PyPI (no Node.js, Yarn, Java, or SBT required on client machines):
 
 ```bash
 pip install managed-spark-cell-monitoring
@@ -35,31 +37,40 @@ pip install managed-spark-cell-monitoring
 In your IPython environment or notebook cell, load the kernel extension:
 
 ```python
-%load_ext managed_spark_cell_monitoring.kernelextension
+%load_ext managed_spark_cell_monitoring
 ```
 
-Alternatively, you can configure it to load automatically in all notebooks by adding it to your `ipython_config.py`:
+Alternatively, configure it to load automatically in all notebook sessions by adding it to your IPython configuration (e.g. `~/.ipython/profile_default/ipython_kernel_config.py`):
 
 ```python
-c.InteractiveShellApp.extensions = [
-    'managed_spark_cell_monitoring.kernelextension'
-]
+c.InteractiveShellApp.extensions.append('managed_spark_cell_monitoring')
 ```
 
-### 3. Configure Spark Session
+### 3. Configure PySpark Session
 
-Create your Spark session with the extra configurations to activate the Scala Listener. You must set `spark.extraListeners` to the fully qualified class name and `spark.driver.extraClassPath` to the physical path of the compiled JAR.
+Create your Spark session with the extra configurations to activate the Scala Listener. Use `managed_spark_cell_monitoring.get_jar_path(...)` to automatically resolve the bundled listener JAR. Pass `"3"` for Apache Spark 3.5 or `"4"` for Apache Spark 4.x:
 
 ```python
+import managed_spark_cell_monitoring
 from pyspark.sql import SparkSession
 
-# Replace with the path to the correct JAR for your Spark version
-JAR_PATH = "path/to/managed-spark-cell-monitoring-spark4-assembly-1.0.0.jar"
+# Specify your target major Apache Spark version:
+# • Pass "3" for Apache Spark 3.5 (e.g., Google Cloud Dataproc 2.2)
+# • Pass "4" for Apache Spark 4.x
+spark_major_version = "3"  # Change to "4" for Spark 4.x clusters
 
-spark = SparkSession.builder \
-        .config('spark.extraListeners', 'managed_spark_cell_monitoring.listener.JupyterManagedSparkCellMonitoringListener') \
-        .config('spark.driver.extraClassPath', JAR_PATH) \
-        .getOrCreate()
+# Automatically resolves the bundled listener JAR inside site-packages
+jar_path = managed_spark_cell_monitoring.get_jar_path(spark_major_version)
+
+spark = (
+    SparkSession.builder
+    .config(
+        'spark.extraListeners',
+        'managed_spark_cell_monitoring.listener.JupyterManagedSparkCellMonitoringListener',
+    )
+    .config('spark.driver.extraClassPath', jar_path)
+    .getOrCreate()
+)
 ```
 
 ---
@@ -67,49 +78,50 @@ spark = SparkSession.builder \
 ## Development & Building
 
 ### Prerequisites
-- Node.js (>= 18.0)
-- Python (>= 3.9)
-- sbt (for compiling Scala listener JARs)
+- **Node.js** (>= 18.0) & **Yarn**
+- **Java JDK** (8, 11, or 17) & **SBT**
+- **Python** (>= 3.8)
 
 ### Building from Source
 
 #### 1. React UI Frontend
-The frontend uses React and is bundled into static assets for AnyWidget.
+The frontend uses React 18 and MobX, bundled via `esbuild` into standalone assets in `managed_spark_cell_monitoring/static/`.
+
 ```bash
 # Install frontend dependencies
-npm install
+yarn --cwd js install
 
-# Bundle React AnyWidget assets into static/widget.js
-npm run build:widgets
+# Bundle frontend assets into static/widget.js and static/widget.css
+yarn --cwd js build
+
+# Run frontend tests and linter
+yarn --cwd js test
+yarn --cwd js lint
 ```
 
-#### 2. Python Kernel Backend
-The Python extension is packaged as a standard Python wheel (`.whl`).
+#### 2. Scala Listener Fat JARs
+The Scala listener is compiled using `sbt` and supports Spark 3 (Scala 2.12) and Spark 4 (Scala 2.13). We use `sbt-assembly` to build shaded Fat JARs directly into `managed_spark_cell_monitoring/static/listeners/`.
+
 ```bash
-# Install the build tool (if not already installed)
-pip install build
+# Run Scala unit tests
+cd scala && sbt test && cd ..
 
-# Build the Python kernel extension wheel
-python -m build --wheel
-
-# Install testing dependencies
-pip install pytest pytest-mock pytest-cov
-
-# Run the Python unit tests with coverage
-python3 -m pytest --cov=.
+# Build shaded Fat JARs for Spark 3 and Spark 4
+cd scala && sbt assembly && cd ..
 ```
 
-#### 3. Scala Listener JARs
-The Scala listener is compiled using `sbt` and supports Spark 3 (Scala 2.12) and Spark 4 (Scala 2.13). We use the `sbt-assembly` plugin to build shaded Fat JARs.
+#### 3. Python Kernel Package
+Install in editable mode and run Python test suites:
+
 ```bash
-# Navigate to the scala directory
-cd scala
+# Install package in editable mode with test dependencies
+pip install -e ".[test]"
 
-# Build shaded Fat JARs for both Spark 3 and Spark 4 simultaneously
-sbt "project spark3" assembly "project spark4" assembly
+# Run Python unit tests
+pytest tests/
 
-# Run the test suite and generate a coverage report
-sbt coverage "project core" test coverageReport
+# Build distribution wheel (.whl) and source archive (.tar.gz)
+python -m build
 ```
 
 ---
