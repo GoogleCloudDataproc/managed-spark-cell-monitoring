@@ -83,12 +83,17 @@ def test_handle_request_history():
   })
 
 
-def test_cleanup_clears_history():
-  """Test that cleanup resets ACTIVE_WIDGET and clears event_history."""
+def test_cleanup_preserves_history_until_unmount():
+  """Test that post-cell cleanup resets ACTIVE_WIDGET while preserving history until unmount."""
   widget = ManagedSparkCellWidget(run_id="run-1", session_id="sess-1")
   widget.append_event({"test": 1}, sequence=1)
   assert len(widget.event_history) == 1
 
+  # Post-cell cleanup keeps history so queued request_history comm messages can be served
   widget.cleanup()
-  assert len(widget.event_history) == 0
+  assert len(widget.event_history) == 1
   assert widget_module.ACTIVE_WIDGET is None
+
+  # Unmount clears history
+  widget._handle_frontend_message(widget, {"type": "widget_unmount"})
+  assert len(widget.event_history) == 0

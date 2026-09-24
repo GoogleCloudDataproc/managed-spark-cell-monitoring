@@ -146,4 +146,50 @@ describe('CellMessageSequencer', () => {
     expect(processedEvents).toEqual([{ msgtype: 'custom' }]);
     expect(sequencer.getLastProcessedSequence()).toBe(0);
   });
+
+  it('flushes pending queue on timeout without spamming requests and processes late replay once', () => {
+    jest.useFakeTimers();
+    try {
+      sequencer.handleLiveEvent({ sequence: 1, data: { val: 1 } });
+      sequencer.handleLiveEvent({ sequence: 2, data: { val: 2 } });
+
+      // Sequences 3 and 4 dropped; 5 and 6 arrive while kernel shell is busy
+      sequencer.handleLiveEvent({ sequence: 5, data: { val: 5 } });
+      sequencer.handleLiveEvent({ sequence: 6, data: { val: 6 } });
+
+      expect(replayRequests).toEqual([{ from: 3, to: 4 }]);
+      expect(processedEvents.map((e) => e.val)).toEqual([1, 2]);
+
+      // Advance past grace timeout (1000ms): pendingQueue flushes so live UI never freezes
+      jest.advanceTimersByTime(1000);
+
+      expect(sequencer.getPendingQueueSize()).toBe(0);
+      expect(sequencer.getLastProcessedSequence()).toBe(6);
+      expect(processedEvents.map((e) => e.val)).toEqual([1, 2, 5, 6]);
+      // Must NOT spam another request_history
+      expect(replayRequests).toHaveLength(1);
+      expect(sequencer.getMissingSequencesCount()).toBe(2);
+
+      // Subsequent live event 7 flows directly without blocking
+      sequencer.handleLiveEvent({ sequence: 7, data: { val: 7 } });
+      expect(processedEvents.map((e) => e.val)).toEqual([1, 2, 5, 6, 7]);
+
+      // Kernel finishes cell and delivers queued replay for 3 and 4
+      sequencer.handleReplayEvents([
+        { sequence: 3, data: { val: 3 } },
+        { sequence: 4, data: { val: 4 } },
+      ]);
+      expect(processedEvents.map((e) => e.val)).toEqual([1, 2, 5, 6, 7, 3, 4]);
+      expect(sequencer.getMissingSequencesCount()).toBe(0);
+
+      // Duplicate replay is ignored (ACKed via missingSequences deletion)
+      sequencer.handleReplayEvents([
+        { sequence: 3, data: { val: '3-dup' } },
+        { sequence: 4, data: { val: '4-dup' } },
+      ]);
+      expect(processedEvents.map((e) => e.val)).toEqual([1, 2, 5, 6, 7, 3, 4]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });

@@ -94,7 +94,8 @@ export class NotebookStore {
 
   onSparkJobStart(cellId: string, data: any) {
     const uniqueJobId = `${this.uniqueId}-job-${data.jobId}`;
-    if (this.jobs[uniqueJobId]) {
+    const existingJob = this.jobs[uniqueJobId];
+    if (existingJob && existingJob.uniqueStageIds.length > 0) {
       if (!this.cells[cellId]) {
         this.cells[cellId] = new Cell(cellId, this);
       }
@@ -109,10 +110,12 @@ export class NotebookStore {
     this.numTotalCores = data.totalCores;
     this.numExecutors = data.numExecutors;
 
-    const job = new SparkJob(this);
+    const job = existingJob || new SparkJob(this);
     job.uniqueId = uniqueJobId;
     job.jobId = data.jobId;
-    job.status = data.status;
+    if (!job.endTime) {
+      job.status = data.status;
+    }
     job.cellId = cellId;
     const jobName = String(data.name).split(' at ')[0];
     job.name = jobName;
@@ -126,7 +129,7 @@ export class NotebookStore {
       let stage = this.stages[uniqueStageId];
       if (!stage) {
         stage = new SparkStage();
-        stage.status = 'PENDING';
+        stage.status = job.endTime ? 'SKIPPED' : 'PENDING';
         this.stages[uniqueStageId] = stage;
       }
       stage.uniqueJobId = job.uniqueId;
@@ -134,7 +137,9 @@ export class NotebookStore {
         stage.numTasks = data.stageInfos[stageId].numTasks;
         stage.name = data.stageInfos[stageId].name;
       }
-      job.uniqueStageIds.push(uniqueStageId);
+      if (!job.uniqueStageIds.includes(uniqueStageId)) {
+        job.uniqueStageIds.push(uniqueStageId);
+      }
     });
     job.uniqueStageIds.sort((a, b) =>
       a.localeCompare(b, undefined, { numeric: true })
@@ -144,6 +149,31 @@ export class NotebookStore {
       const lastStageId = Math.max(...data.stageIds.map(Number));
       job.name =
         this.stages[`${this.uniqueId}-stage-${lastStageId}`]?.name || 'Job';
+    }
+
+    // Re-aggregate task counts from stages in case stage updates arrived before jobStart
+    let activeTasks = 0;
+    let completedTasks = 0;
+    let failedTasks = 0;
+    let totalTasks = 0;
+    job.uniqueStageIds.forEach((uniqueStageId) => {
+      const s = this.stages[uniqueStageId];
+      if (s) {
+        activeTasks += s.numActiveTasks || 0;
+        failedTasks += s.numFailedTasks || 0;
+        totalTasks += s.numTasks || 0;
+        if (s.status === 'SKIPPED') {
+          completedTasks += s.numTasks || 0;
+        } else {
+          completedTasks += s.numCompletedTasks || 0;
+        }
+      }
+    });
+    if (totalTasks > 0) {
+      job.numTasks = totalTasks;
+      job.numActiveTasks = job.endTime ? 0 : activeTasks;
+      job.numCompletedTasks = completedTasks;
+      job.numFailedTasks = failedTasks;
     }
 
     if (!this.cells[cellId]) {

@@ -35,6 +35,8 @@ export interface SequencerOptions {
 export class CellMessageSequencer {
   private lastProcessedSequence: number = 0;
   private pendingQueue: Map<number, SequencedEvent> = new Map();
+  private missingSequences: Set<number> = new Set();
+  private requestedSequences: Set<number> = new Set();
   private isRequestingReplay: boolean = false;
   private replayTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly onProcessEvent: (data: any) => void;
@@ -44,7 +46,7 @@ export class CellMessageSequencer {
   constructor(options: SequencerOptions) {
     this.onProcessEvent = options.onProcessEvent;
     this.onRequestReplay = options.onRequestReplay;
-    this.replayTimeoutMs = options.replayTimeoutMs ?? 3000;
+    this.replayTimeoutMs = options.replayTimeoutMs ?? 1000;
   }
 
   public getLastProcessedSequence(): number {
@@ -57,6 +59,10 @@ export class CellMessageSequencer {
 
   public getIsRequestingReplay(): boolean {
     return this.isRequestingReplay;
+  }
+
+  public getMissingSequencesCount(): number {
+    return this.missingSequences.size;
   }
 
   /**
@@ -73,19 +79,32 @@ export class CellMessageSequencer {
 
     const seq = event.sequence;
 
-    // Case 1: In order
-    if (seq === this.lastProcessedSequence + 1) {
+    // Case 1: In order (and no pending items ahead of it waiting for an active grace window)
+    if (seq === this.lastProcessedSequence + 1 && !this.isRequestingReplay) {
       this.processSingleEvent(event);
       this.drainContiguousQueue();
       return;
     }
 
-    // Case 2: Duplicate / Already processed
+    // Case 2: Older or duplicate sequence number
     if (seq <= this.lastProcessedSequence) {
+      // If this sequence was previously skipped as a missing gap, process it once and ACK
+      if (this.missingSequences.has(seq)) {
+        this.missingSequences.delete(seq);
+        this.requestedSequences.delete(seq);
+        if (event.data) {
+          this.onProcessEvent(event.data);
+        }
+      }
       return;
     }
 
     // Case 3: Gap detected (seq > lastProcessedSequence + 1)
+    for (let s = this.lastProcessedSequence + 1; s < seq; s++) {
+      if (!this.pendingQueue.has(s)) {
+        this.missingSequences.add(s);
+      }
+    }
     this.pendingQueue.set(seq, event);
     this.triggerReplayRequest(this.lastProcessedSequence + 1, seq - 1);
   }
@@ -101,10 +120,23 @@ export class CellMessageSequencer {
     const sorted = [...events].sort((a, b) => a.sequence - b.sequence);
 
     for (const event of sorted) {
-      if (event.sequence === this.lastProcessedSequence + 1) {
+      const seq = event.sequence;
+      if (seq === this.lastProcessedSequence + 1) {
         this.processSingleEvent(event);
-      } else if (event.sequence > this.lastProcessedSequence + 1) {
-        this.pendingQueue.set(event.sequence, event);
+        this.drainContiguousQueue();
+      } else if (this.missingSequences.has(seq)) {
+        // Late replay for a previously skipped gap (or out-of-order replay batch item)
+        if (seq < this.lastProcessedSequence) {
+          this.missingSequences.delete(seq);
+          this.requestedSequences.delete(seq);
+          if (event.data) {
+            this.onProcessEvent(event.data);
+          }
+        } else {
+          this.pendingQueue.set(seq, event);
+        }
+      } else if (seq > this.lastProcessedSequence + 1) {
+        this.pendingQueue.set(seq, event);
       }
     }
 
@@ -115,6 +147,11 @@ export class CellMessageSequencer {
       const keys = Array.from(this.pendingQueue.keys()).sort((a, b) => a - b);
       const earliest = keys[0];
       if (earliest > this.lastProcessedSequence + 1) {
+        if (events.length > 0) {
+          for (let s = this.lastProcessedSequence + 1; s < earliest; s++) {
+            this.requestedSequences.delete(s);
+          }
+        }
         this.triggerReplayRequest(this.lastProcessedSequence + 1, earliest - 1);
       }
     }
@@ -127,11 +164,17 @@ export class CellMessageSequencer {
     this.clearReplayTimer();
     this.lastProcessedSequence = 0;
     this.pendingQueue.clear();
+    this.missingSequences.clear();
+    this.requestedSequences.clear();
     this.isRequestingReplay = false;
   }
 
   private processSingleEvent(event: SequencedEvent): void {
-    this.lastProcessedSequence = event.sequence;
+    this.missingSequences.delete(event.sequence);
+    this.requestedSequences.delete(event.sequence);
+    if (event.sequence > this.lastProcessedSequence) {
+      this.lastProcessedSequence = event.sequence;
+    }
     if (event.data) {
       this.onProcessEvent(event.data);
     }
@@ -146,23 +189,55 @@ export class CellMessageSequencer {
     }
   }
 
+  /**
+   * If the kernel's shell channel is busy executing a long-running cell and cannot
+   * reply within replayTimeoutMs, flush the pending queue so live jobs/stages continue
+   * updating in real time without head-of-line blocking. Missing sequences remain in
+   * missingSequences and will be applied once when the queued replay_events arrives.
+   */
+  private flushPendingQueueOnTimeout(): void {
+    if (this.pendingQueue.size === 0) return;
+    const sortedKeys = Array.from(this.pendingQueue.keys()).sort((a, b) => a - b);
+    for (const seq of sortedKeys) {
+      for (let s = this.lastProcessedSequence + 1; s < seq; s++) {
+        if (!this.pendingQueue.has(s)) {
+          this.missingSequences.add(s);
+        }
+      }
+      const ev = this.pendingQueue.get(seq)!;
+      this.pendingQueue.delete(seq);
+      this.processSingleEvent(ev);
+    }
+  }
+
   private triggerReplayRequest(fromSeq: number, toSeq?: number): void {
     if (this.isRequestingReplay) return;
-    this.isRequestingReplay = true;
 
+    const endSeq = toSeq ?? fromSeq;
+    let hasUnrequested = false;
+    for (let s = fromSeq; s <= endSeq; s++) {
+      if (!this.requestedSequences.has(s)) {
+        hasUnrequested = true;
+        this.requestedSequences.add(s);
+      }
+    }
+
+    if (!hasUnrequested) {
+      // Already requested this range once; flush pending items so UI doesn't block
+      this.flushPendingQueueOnTimeout();
+      return;
+    }
+
+    this.isRequestingReplay = true;
     this.onRequestReplay(fromSeq, toSeq);
 
-    // Set up retry timer in case replay response packet is lost in transit
+    // Grace window: if kernel replies immediately, handleReplayEvents processes in order.
+    // If kernel shell is busy running the cell, flush pendingQueue so live UI doesn't freeze,
+    // without spamming duplicate request_history messages.
     this.clearReplayTimer();
     this.replayTimer = setTimeout(() => {
       this.isRequestingReplay = false;
-      if (this.pendingQueue.size > 0) {
-        const keys = Array.from(this.pendingQueue.keys()).sort((a, b) => a - b);
-        const earliest = keys[0];
-        if (earliest > this.lastProcessedSequence + 1) {
-          this.triggerReplayRequest(this.lastProcessedSequence + 1, earliest - 1);
-        }
-      }
+      this.flushPendingQueueOnTimeout();
     }, this.replayTimeoutMs);
   }
 

@@ -44,11 +44,12 @@ class ManagedSparkCellWidget(anywidget.AnyWidget):
     self.event_history = []
     self.on_msg(self._handle_frontend_message)
 
-  def cleanup(self):
+  def cleanup(self, clear_history=False):
     global ACTIVE_WIDGET
     if ACTIVE_WIDGET is self:
       ACTIVE_WIDGET = None
-    self.event_history.clear()
+    if clear_history:
+      self.event_history.clear()
 
   def append_event(self, event, sequence):
     """Sync a new telemetry event packet to the frontend Backbone model."""
@@ -76,3 +77,5 @@ class ManagedSparkCellWidget(anywidget.AnyWidget):
           "from_sequence": from_seq,
           "events": matching,
       })
+    elif msg_type == "widget_unmount":
+      self.cleanup(clear_history=True)
