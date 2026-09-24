@@ -28,6 +28,7 @@ def test_widget_initialization():
   assert widget.session_id == "sess-456"
   assert widget.active_jobs_count == 0
   assert widget_module.ACTIVE_WIDGET is widget
+  assert "managed-spark-cell-widget" in widget._dom_classes
 
 
 def test_append_event_sends_sequence():

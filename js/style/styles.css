@@ -22,6 +22,14 @@
   border: none;
 }
 
+/* Scoped dark mode fix for VS Code notebook wrapper (only affects this widget)
+ * See: https://github.com/microsoft/vscode-jupyter/issues/9403
+ */
+.cell-output-ipywidget-background:has(.managed-spark-cell-widget),
+.cell-output-ipywidget-background:has(.pm) {
+  background: transparent !important;
+}
+
 :root {
   /* Default light mode values */
   --cellmonitor-bg-primary: #ffffff;

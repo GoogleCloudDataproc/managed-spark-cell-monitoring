@@ -115,6 +115,27 @@ export default {
       notebookStore.cells[cellId] = new Cell(cellId, notebookStore);
     }
 
+    el.classList.add('managed-spark-cell-widget');
+
+    // Remove the hardcoded white background wrapper (.cell-output-ipywidget-background)
+    // injected by VS Code Jupyter extension in dark mode for this widget instance.
+    // See: https://github.com/microsoft/vscode-jupyter/issues/9403
+    const removeParentBackground = () => {
+      const parentBackground = el.closest('.cell-output-ipywidget-background');
+      if (parentBackground) {
+        (parentBackground as HTMLElement).style.setProperty(
+          'background-color',
+          'transparent',
+          'important'
+        );
+      }
+    };
+
+    removeParentBackground();
+    if (!el.closest('.cell-output-ipywidget-background') && typeof requestAnimationFrame !== 'undefined') {
+      requestAnimationFrame(removeParentBackground);
+    }
+
     // Mount isolated React App inside standard DOM container passed by widget manager
     const container = document.createElement('div');
     el.appendChild(container);
