@@ -115,6 +115,11 @@ export default {
       notebookStore.cells[cellId] = new Cell(cellId, notebookStore);
     }
 
+    // Tag root element so CSS in styles.css can scope transparent background-color
+    // on VS Code's .cell-output-ipywidget-background wrapper in dark mode.
+    // See: https://github.com/microsoft/vscode-jupyter/issues/9403
+    el.classList.add('managed-spark-cell-widget');
+
     // Mount isolated React App inside standard DOM container passed by widget manager
     const container = document.createElement('div');
     el.appendChild(container);

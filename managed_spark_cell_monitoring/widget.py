@@ -39,6 +39,7 @@ class ManagedSparkCellWidget(anywidget.AnyWidget):
     )
     global ACTIVE_WIDGET
     ACTIVE_WIDGET = self
+    self.add_class("managed-spark-cell-widget")
     self.active_jobs_count = 0
 
   def cleanup(self):
