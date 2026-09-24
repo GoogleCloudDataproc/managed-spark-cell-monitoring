@@ -27,7 +27,7 @@
  */
 .cell-output-ipywidget-background:has(.managed-spark-cell-widget),
 .cell-output-ipywidget-background:has(.pm) {
-  background: transparent !important;
+  background-color: transparent !important;
 }
 
 :root {
