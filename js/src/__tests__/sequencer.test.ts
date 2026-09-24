@@ -147,6 +147,22 @@ describe('CellMessageSequencer', () => {
     expect(sequencer.getLastProcessedSequence()).toBe(0);
   });
 
+  it('handles unfulfillable gaps by skipping them to avoid infinite loops', () => {
+    sequencer.handleLiveEvent({ sequence: 1, data: { val: 1 } });
+    sequencer.handleLiveEvent({ sequence: 5, data: { val: 5 } });
+
+    expect(replayRequests).toEqual([{ from: 2, to: 4 }]);
+
+    // Server returns empty events (cannot fulfill gap 2-4)
+    sequencer.handleReplayEvents([]);
+
+    // It should skip the unfulfillable gap and process sequence 5
+    expect(sequencer.getLastProcessedSequence()).toBe(5);
+    expect(processedEvents.map((e) => e.val)).toEqual([1, 5]);
+    expect(sequencer.getPendingQueueSize()).toBe(0);
+    expect(sequencer.getIsRequestingReplay()).toBe(false);
+  });
+
   it('flushes pending queue on timeout without spamming requests and processes late replay once', () => {
     jest.useFakeTimers();
     try {

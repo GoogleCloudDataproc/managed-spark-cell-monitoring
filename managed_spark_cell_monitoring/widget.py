@@ -14,6 +14,7 @@
 # limitations under the License.
 """Managed Spark Cell Monitoring AnyWidget Backend."""
 
+import collections
 import pathlib
 import anywidget
 import traitlets
@@ -41,7 +42,7 @@ class ManagedSparkCellWidget(anywidget.AnyWidget):
     ACTIVE_WIDGET = self
     self.active_jobs_count = 0
     self.max_history_events = max_history_events
-    self.event_history = []
+    self.event_history = collections.deque(maxlen=max_history_events)
     self.on_msg(self._handle_frontend_message)
 
   def cleanup(self, clear_history=False):
@@ -54,8 +55,6 @@ class ManagedSparkCellWidget(anywidget.AnyWidget):
   def append_event(self, event, sequence):
     """Sync a new telemetry event packet to the frontend Backbone model."""
     self.event_history.append({"sequence": sequence, "data": event})
-    if len(self.event_history) > self.max_history_events:
-      self.event_history = self.event_history[-self.max_history_events:]
     # Send raw event instantly over high-speed custom messaging Comm channel
     self.send({"type": "spark_event", "data": event, "sequence": sequence})
 
