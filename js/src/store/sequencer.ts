@@ -120,39 +120,38 @@ export class CellMessageSequencer {
     const sorted = [...events].sort((a, b) => a.sequence - b.sequence);
 
     for (const event of sorted) {
-      const seq = event.sequence;
-      if (seq === this.lastProcessedSequence + 1) {
-        this.processSingleEvent(event);
-        this.drainContiguousQueue();
-      } else if (this.missingSequences.has(seq)) {
-        // Late replay for a previously skipped gap (or out-of-order replay batch item)
-        if (seq < this.lastProcessedSequence) {
-          this.missingSequences.delete(seq);
-          this.requestedSequences.delete(seq);
-          if (event.data) {
-            this.onProcessEvent(event.data);
+      if (event.sequence > this.lastProcessedSequence) {
+        if (event.sequence > this.lastProcessedSequence + 1) {
+          for (let s = this.lastProcessedSequence + 1; s < event.sequence; s++) {
+            this.missingSequences.delete(s);
           }
-        } else {
-          this.pendingQueue.set(seq, event);
+          this.lastProcessedSequence = event.sequence - 1;
         }
-      } else if (seq > this.lastProcessedSequence + 1) {
-        this.pendingQueue.set(seq, event);
+        this.processSingleEvent(event);
+      } else if (this.missingSequences.has(event.sequence)) {
+        // Late replay for a previously skipped gap (arrived after timeout flush)
+        this.missingSequences.delete(event.sequence);
+        this.requestedSequences.delete(event.sequence);
+        if (event.data) {
+          this.onProcessEvent(event.data);
+        }
       }
     }
 
     this.drainContiguousQueue();
 
-    // If there is still a gap remaining before the earliest pending item, request it
+    // If there is still a gap remaining before the earliest pending item,
+    // it means the server could not fulfill that part of the range.
+    // We must skip it to avoid an infinite request loop.
     if (this.pendingQueue.size > 0) {
       const keys = Array.from(this.pendingQueue.keys()).sort((a, b) => a - b);
       const earliest = keys[0];
       if (earliest > this.lastProcessedSequence + 1) {
-        if (events.length > 0) {
-          for (let s = this.lastProcessedSequence + 1; s < earliest; s++) {
-            this.requestedSequences.delete(s);
-          }
+        for (let s = this.lastProcessedSequence + 1; s < earliest; s++) {
+          this.missingSequences.delete(s);
         }
-        this.triggerReplayRequest(this.lastProcessedSequence + 1, earliest - 1);
+        this.lastProcessedSequence = earliest - 1;
+        this.drainContiguousQueue();
       }
     }
   }

@@ -102,24 +102,23 @@ describe('CellMessageSequencer', () => {
     expect(sequencer.getIsRequestingReplay()).toBe(false);
   });
 
-  it('handles partial replay and re-requests remaining gap', () => {
+  it('handles partial replay by skipping unfulfilled sub-gaps without re-requesting', () => {
     sequencer.handleLiveEvent({ sequence: 1, data: { val: 1 } });
     sequencer.handleLiveEvent({ sequence: 5, data: { val: 5 } });
 
     expect(replayRequests).toEqual([{ from: 2, to: 4 }]);
 
-    // Server only replays sequence 2 (3 and 4 still missing)
-    sequencer.handleReplayEvents([{ sequence: 2, data: { val: 2 } }]);
-
-    expect(sequencer.getLastProcessedSequence()).toBe(2);
-    expect(processedEvents.map((e) => e.val)).toEqual([1, 2]);
-    expect(sequencer.getPendingQueueSize()).toBe(1); // sequence 5 is still pending
-
-    // Should request next gap: from 3 to 4
-    expect(replayRequests).toEqual([
-      { from: 2, to: 4 },
-      { from: 3, to: 4 },
+    // Server only replays sequence 2 and 4 (3 was evicted)
+    sequencer.handleReplayEvents([
+      { sequence: 2, data: { val: 2 } },
+      { sequence: 4, data: { val: 4 } },
     ]);
+
+    expect(sequencer.getLastProcessedSequence()).toBe(5);
+    expect(processedEvents.map((e) => e.val)).toEqual([1, 2, 4, 5]);
+    expect(sequencer.getPendingQueueSize()).toBe(0);
+    // Should not re-request unfulfilled sub-gaps
+    expect(replayRequests).toEqual([{ from: 2, to: 4 }]);
   });
 
   it('resets all state correctly', () => {
