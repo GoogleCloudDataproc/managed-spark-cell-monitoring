@@ -8,7 +8,7 @@ Leveraging [AnyWidget](https://anywidget.dev/), it enables platform-agnostic, ze
 
 ## Key Features
 
-- 📊 **Real-time Progress Tracking:** Visual progress bars for active Spark jobs, stages, and tasks directly in notebook cells.
+- 📊 **Real-time Progress Tracking:** Visual progress bars for active Apache Spark jobs, stages, and tasks directly in notebook cells.
 - ⚡ **AnyWidget Architecture:** Precompiled ESM widgets rendered natively without requiring custom JupyterLab extension binaries.
 - ⏱️ **Task Timeline & Metrics:** Detailed timeline graphs for task execution, GC time, serialization overhead, and active executor core utilization.
 
@@ -16,7 +16,7 @@ Leveraging [AnyWidget](https://anywidget.dev/), it enables platform-agnostic, ze
 
 ## Architecture Overview
 
-1. **Scala Listener (`scalalistener`):** Plugs into the Spark Driver's `SparkListener` bus to capture fine-grained task and stage metrics with lock-free queueing and delta-change metric caching.
+1. **Scala Listener (`scalalistener`):** Plugs into the Apache Spark driver's `SparkListener` bus to capture fine-grained task and stage metrics with lock-free queueing and delta-change metric caching.
 2. **Python Kernel Extension (`managed_spark_cell_monitoring.kernelextension`):** Intercepts cell execution hooks (`pre_run_cell`, `post_run_cell`) and routes telemetry events to active widget instances via Jupyter Comms.
 3. **AnyWidget React Frontend (`managed_spark_cell_monitoring/static/widget.js`):** Modular React 18 / MobX frontend compiled via `esbuild`, providing isolated UI components for job tables, stage bars, and task timelines.
 
@@ -48,7 +48,7 @@ c.InteractiveShellApp.extensions.append('managed_spark_cell_monitoring')
 
 ### 3. Configure PySpark Session
 
-Create your Spark session with the extra configurations to activate the Scala Listener. Use `managed_spark_cell_monitoring.get_jar_path(...)` to automatically resolve the bundled listener JAR. Pass `"3"` for Apache Spark 3.5 or `"4"` for Apache Spark 4.x:
+Create your Apache Spark `SparkSession` with the extra configurations to activate the Scala Listener. Use `managed_spark_cell_monitoring.get_jar_path(...)` to automatically resolve the bundled listener JAR. Pass `"3"` for Apache Spark 3.5 or `"4"` for Apache Spark 4.x:
 
 ```python
 import managed_spark_cell_monitoring
@@ -57,7 +57,7 @@ from pyspark.sql import SparkSession
 # Specify your target major Apache Spark version:
 # • Pass "3" for Apache Spark 3.5 (e.g., Google Cloud Dataproc 2.2)
 # • Pass "4" for Apache Spark 4.x
-spark_major_version = "3"  # Change to "4" for Spark 4.x clusters
+spark_major_version = "3"  # Change to "4" for Apache Spark 4.x clusters
 
 # Automatically resolves the bundled listener JAR inside site-packages
 jar_path = managed_spark_cell_monitoring.get_jar_path(spark_major_version)
@@ -100,13 +100,13 @@ yarn --cwd js lint
 ```
 
 #### 2. Scala Listener Fat JARs
-The Scala listener is compiled using `sbt` and supports Spark 3 (Scala 2.12) and Spark 4 (Scala 2.13). We use `sbt-assembly` to build shaded Fat JARs directly into `managed_spark_cell_monitoring/static/listeners/`.
+The Scala listener is compiled using `sbt` and supports Apache Spark 3.5 (Scala 2.12) and Apache Spark 4.x (Scala 2.13). We use `sbt-assembly` to build shaded Fat JARs directly into `managed_spark_cell_monitoring/static/listeners/`.
 
 ```bash
 # Run Scala unit tests
 cd scala && sbt test && cd ..
 
-# Build shaded Fat JARs for Spark 3 and Spark 4
+# Build shaded Fat JARs for Apache Spark 3.5 and Apache Spark 4.x
 cd scala && sbt assembly && cd ..
 ```
 
@@ -129,3 +129,9 @@ python -m build
 ## License
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
+
+---
+
+## Trademarks
+
+Apache®, Apache Spark™, Spark™, and the Apache feather logo are either registered trademarks or trademarks of the Apache Software Foundation in the United States and/or other countries.
