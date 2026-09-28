@@ -48,7 +48,7 @@ c.InteractiveShellApp.extensions.append('managed_spark_cell_monitoring')
 
 ### 3. Configure PySpark Session
 
-Create your Apache Spark session with the extra configurations to activate the Scala Listener. Use `managed_spark_cell_monitoring.get_jar_path(...)` to automatically resolve the bundled listener JAR. Pass `"3"` for Apache Spark 3.5 or `"4"` for Apache Spark 4.x:
+Create your Apache Spark `SparkSession` with the extra configurations to activate the Scala Listener. Use `managed_spark_cell_monitoring.get_jar_path(...)` to automatically resolve the bundled listener JAR. Pass `"3"` for Apache Spark 3.5 or `"4"` for Apache Spark 4.x:
 
 ```python
 import managed_spark_cell_monitoring
@@ -106,7 +106,7 @@ The Scala listener is compiled using `sbt` and supports Apache Spark 3.5 (Scala 
 # Run Scala unit tests
 cd scala && sbt test && cd ..
 
-# Build shaded Fat JARs for Apache Spark 3 and Apache Spark 4
+# Build shaded Fat JARs for Apache Spark 3.5 and Apache Spark 4.x
 cd scala && sbt assembly && cd ..
 ```
 
