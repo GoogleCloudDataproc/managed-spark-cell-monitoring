@@ -15,13 +15,14 @@
  * limitations under the License.
  */
 
+import {runInAction} from 'mobx';
 import {createRoot} from 'react-dom/client';
 import '../style/jobtable.css';
 import '../style/styles.css';
 import '../style/timeline.css';
 import '../style/task-chart.css';
 import {CellWidget} from './components';
-import {store} from './store';
+import {store, CellMessageSequencer} from './store';
 import {Cell} from './store/cell';
 import {NotebookStore} from './store/notebook';
 
@@ -83,17 +84,37 @@ export default {
       notebookStore.cells[cellId] = new Cell(cellId, notebookStore);
     }
 
+    const sequencer = new CellMessageSequencer({
+      onProcessEvent: (eventData: any) => {
+        routeSparkMessageToStore(eventData, notebookStore, cellId);
+      },
+      onRequestReplay: (fromSequence: number, toSequence?: number) => {
+        model.send({
+          type: 'request_history',
+          from_sequence: fromSequence,
+          to_sequence: toSequence,
+        });
+      },
+    });
+
     const handleCustomMessage = (msg: any) => {
       if (!msg) return;
 
-      if (msg.type === 'spark_event' && msg.data) {
-        routeSparkMessageToStore(msg.data, notebookStore, cellId);
+      if (msg.type === 'spark_event') {
+        runInAction(() => {
+          sequencer.handleLiveEvent(msg);
+        });
+      } else if (msg.type === 'replay_events' && Array.isArray(msg.events)) {
+        runInAction(() => {
+          sequencer.handleReplayEvents(msg.events);
+        });
       }
     };
 
     model.on('msg:custom', handleCustomMessage);
 
     return () => {
+      sequencer.reset();
       model.send({ type: 'widget_unmount' });
       model.off('msg:custom', handleCustomMessage);
     };

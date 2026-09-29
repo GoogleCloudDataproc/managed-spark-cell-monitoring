@@ -47,3 +47,6 @@ export const useNotebookStore = () => {
 export const useCellStore = () => {
   return React.useContext(CellStoreContext);
 };
+
+export { CellMessageSequencer } from './sequencer';
+export type { SequencedEvent, SequencerOptions } from './sequencer';
