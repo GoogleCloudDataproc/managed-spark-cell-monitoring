@@ -47,7 +47,7 @@ lazy val spark4 = (project in file("spark-4"))
     libraryDependencies ++= Seq(
       "org.scalatest" %% "scalatest" % "3.2.16" % Test,
       "org.apache.spark" %% "spark-core" % "4.0.0-preview1" % "provided",
-      "org.json4s" %% "json4s-jackson" % "3.7.0-M11"
+      "org.json4s" %% "json4s-jackson" % "4.0.7"
     ),
     assembly / assemblyShadeRules := sharedShadeRules
   )
