@@ -42,7 +42,7 @@ artifacts = [
     "managed_spark_cell_monitoring/static/**/*",
 ]
 exclude = [
-    "*.map",
+    "**/*.map",
 ]
 
 [tool.hatch.build.targets.sdist]

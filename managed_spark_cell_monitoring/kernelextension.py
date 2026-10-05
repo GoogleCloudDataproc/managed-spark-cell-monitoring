@@ -175,9 +175,10 @@ class CellMonitorExtension:
 
   def pre_run_cell_hook(self, *args, **kwargs):
     """Initializes tracking state and renders a new widget before a cell runs."""
-    cell_info = args[0] if args else kwargs.get('cell_info', None)
+    cell_info = args[0] if args else kwargs.get('info', None)
     if cell_info is not None:
       if getattr(cell_info, 'silent', False) or not getattr(cell_info, 'store_history', True):
+        self.run_id = None
         return
 
     self.sequence_counter = 0
