@@ -175,6 +175,11 @@ class CellMonitorExtension:
 
   def pre_run_cell_hook(self, *args, **kwargs):
     """Initializes tracking state and renders a new widget before a cell runs."""
+    cell_info = args[0] if args else kwargs.get('cell_info', None)
+    if cell_info is not None:
+      if getattr(cell_info, 'silent', False) or not getattr(cell_info, 'store_history', True):
+        return
+
     self.sequence_counter = 0
     self.run_id = str(uuid.uuid4())
 
@@ -199,6 +204,10 @@ class CellMonitorExtension:
 
   def post_run_cell_hook(self, result):
     """Marks the cell as finished and cleans up the widget if no jobs are active."""
+    if result is not None and getattr(result, 'info', None) is not None:
+      if getattr(result.info, 'silent', False) or not getattr(result.info, 'store_history', True):
+        return
+
     if self.run_id in self.active_widgets:
       widget = self.active_widgets[self.run_id]
       widget.cell_finished = True

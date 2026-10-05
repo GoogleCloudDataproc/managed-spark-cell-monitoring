@@ -41,6 +41,9 @@ artifacts = [
     "managed_spark_cell_monitoring/static/*",
     "managed_spark_cell_monitoring/static/**/*",
 ]
+exclude = [
+    "*.map",
+]
 
 [tool.hatch.build.targets.sdist]
 ignore-vcs = true

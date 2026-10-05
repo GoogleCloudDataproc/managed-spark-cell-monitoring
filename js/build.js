@@ -33,8 +33,8 @@ esbuild.build({
     '.svg': 'dataurl',
     '.png': 'dataurl',
   },
-  minify: process.env.NODE_ENV === 'production',
-  sourcemap: true,
+  minify: process.env.NODE_ENV !== 'development',
+  sourcemap: process.env.NODE_ENV === 'development',
 }).then(() => {
   console.log('[Managed Spark Cell Monitoring] Frontend bundled successfully to static/widget.js');
 }).catch((err) => {
