@@ -16,7 +16,7 @@
  */
 
 /*
- * Header active-job strip and executors/cores text.
+ * Header active-job strip, executors/cores text and console link.
  * All colors are reused from styles.css / jobtable.css (no new palette).
  */
 
@@ -142,6 +142,31 @@
   margin-right: 12px;
   font-size: 13px;
   white-space: nowrap;
+}
+
+/* --------------Console link ("View in Google Cloud")-------------------- */
+/*
+ * Icon-only; sizing and hover come from the shared .tabbutton rules. The
+ * icon uses the same grey as the tab icon SVGs (#444746) in both themes so
+ * it does not stand out from its neighbours. Host focus rings (VS Code
+ * outlines focused <a> elements with its theme's focus colour, which lingers
+ * after the link opens a new tab) are suppressed; keyboard focus reuses the
+ * tab-button hover treatment instead.
+ */
+.pm .console-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #444746;
+  text-decoration: none;
+}
+.pm .console-link:focus {
+  outline: none;
+}
+.pm .console-link:focus-visible {
+  background-color: rgba(60, 64, 67, 0.04);
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 /* --------------Dark mode-------------------- */

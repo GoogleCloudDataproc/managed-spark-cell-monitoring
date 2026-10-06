@@ -22,10 +22,15 @@ from managed_spark_cell_monitoring.widget import ManagedSparkCellWidget
 
 def test_widget_initialization():
   """Test that widget initializes with proper traits and global state."""
-  widget = ManagedSparkCellWidget(run_id="run-123", session_id="sess-456")
+  widget = ManagedSparkCellWidget(
+      run_id="run-123",
+      session_id="sess-456",
+      spark_ui_url="https://console.cloud.google.com/dataproc",
+  )
 
   assert widget.run_id == "run-123"
   assert widget.session_id == "sess-456"
+  assert widget.spark_ui_url == "https://console.cloud.google.com/dataproc"
   assert widget.active_jobs_count == 0
   assert widget_module.ACTIVE_WIDGET is widget
   assert "managed-spark-cell-widget" in widget._dom_classes

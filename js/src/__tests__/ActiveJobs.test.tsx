@@ -102,13 +102,13 @@ function setExecutors(notebook: NotebookStore, executors?: number, cores?: numbe
   });
 }
 
-function renderHeader() {
+function renderHeader(props: { viewUrl?: string } = {}) {
   const notebook = new NotebookStore('nb');
   const cell = new Cell('cell', notebook);
   const utils = render(
     <NotebookStoreContext.Provider value={notebook}>
       <CellStoreContext.Provider value={cell}>
-        <CellMonitorHeader />
+        <CellMonitorHeader {...props} />
       </CellStoreContext.Provider>
     </NotebookStoreContext.Provider>,
   );
@@ -368,8 +368,10 @@ describe('Header layout', () => {
     expect(screen.queryByText(/executor/)).not.toBeInTheDocument();
   });
 
-  it('orders the right-side controls as executors, views, close', () => {
-    const { notebook, cell, container } = renderHeader();
+  it('orders the right-side controls as executors, views, console link, close', () => {
+    const { notebook, cell, container } = renderHeader({
+      viewUrl: 'https://console.cloud.google.com/dataproc',
+    });
     setExecutors(notebook, 2, 8);
     addJob(notebook, cell, { id: 1, name: 'count' });
     revealJobs();
@@ -383,7 +385,50 @@ describe('Header layout', () => {
       'Jobs',
       'Tasks',
       'Event Timeline',
+      'View in Google Cloud',
       'Close Display',
     ]);
+  });
+});
+
+describe('ConsoleLink in header', () => {
+  it('is hidden when no URL is provided', () => {
+    renderHeader();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it('renders an https URL as an icon-only new-tab link', () => {
+    renderHeader({ viewUrl: 'https://console.cloud.google.com/dataproc/clusters' });
+    const link = screen.getByRole('link', {
+      name: 'View in Google Cloud (opens in a new tab)',
+    });
+    expect(link).toHaveAttribute('href', 'https://console.cloud.google.com/dataproc/clusters');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link).toHaveTextContent('');
+  });
+
+  it('rejects non-https URLs', () => {
+    renderHeader({ viewUrl: 'javascript:alert(1)' });
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it('reads viewUrl reactively from NotebookStore when prop is not passed', () => {
+    const { notebook } = renderHeader();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+
+    act(() => {
+      notebook.setViewUrl(
+        'https://console.cloud.google.com/dataproc/interactive/us-central1/sess-1/sparkApplications/applications/application_1_1?project=my-proj',
+      );
+    });
+
+    const link = screen.getByRole('link', {
+      name: 'View in Google Cloud (opens in a new tab)',
+    });
+    expect(link).toHaveAttribute(
+      'href',
+      'https://console.cloud.google.com/dataproc/interactive/us-central1/sess-1/sparkApplications/applications/application_1_1?project=my-proj',
+    );
   });
 });

@@ -33,10 +33,21 @@ class ManagedSparkCellWidget(anywidget.AnyWidget):
   # State synchronization fields
   run_id = traitlets.Unicode("").tag(sync=True)
   session_id = traitlets.Unicode("").tag(sync=True)
+  spark_ui_url = traitlets.Unicode("").tag(sync=True)
 
-  def __init__(self, run_id, session_id, max_history_events=50000, **kwargs):
+  def __init__(
+      self,
+      run_id,
+      session_id,
+      spark_ui_url="",
+      max_history_events=50000,
+      **kwargs,
+  ):
     super(ManagedSparkCellWidget, self).__init__(
-        run_id=run_id, session_id=session_id, **kwargs
+        run_id=run_id,
+        session_id=session_id,
+        spark_ui_url=spark_ui_url,
+        **kwargs,
     )
     global ACTIVE_WIDGET
     ACTIVE_WIDGET = self
