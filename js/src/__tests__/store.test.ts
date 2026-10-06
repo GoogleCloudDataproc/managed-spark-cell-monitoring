@@ -113,6 +113,16 @@ describe('MobX Store Tests', () => {
     nbStore.onSparkExecutorRemoved({
       executorId: 'exec1'
     });
+    expect(nbStore.numExecutors).toBe(0);
+
+    // Duplicate removal or negative payload should never result in negative counts
+    nbStore.onSparkExecutorRemoved({
+      executorId: 'exec1',
+      totalCores: -4,
+      numExecutors: -1
+    });
+    expect(nbStore.numExecutors).toBe(0);
+    expect(nbStore.numTotalCores).toBe(0);
   });
 
   it('correctly updates TaskChartStore through Cell', () => {

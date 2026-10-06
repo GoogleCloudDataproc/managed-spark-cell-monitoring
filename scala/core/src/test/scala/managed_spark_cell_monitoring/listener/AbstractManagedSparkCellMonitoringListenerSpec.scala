@@ -248,16 +248,30 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
     }
   }
 
-  it should "handle onExecutorRemoved" in {
+  it should "handle onExecutorRemoved and not go negative on duplicate or untracked removals" in {
     withListenerAndSocket { (listener, server) =>
+      val execInfo = new org.apache.spark.scheduler.cluster.ExecutorInfo("localhost", 4, Map.empty)
+      listener.onExecutorAdded(SparkListenerExecutorAdded(900L, "exec1", execInfo))
+      listener.numExecutors shouldBe 1
+      listener.totalCores shouldBe 4
+
       val execRemoved = SparkListenerExecutorRemoved(1000L, "exec1", "reason")
       listener.onExecutorRemoved(execRemoved)
+      listener.numExecutors shouldBe 0
+      listener.totalCores shouldBe 0
+
+      // Duplicate removal for the same executorId must not drive counts negative
+      listener.onExecutorRemoved(execRemoved)
+      listener.numExecutors shouldBe 0
+      listener.totalCores shouldBe 0
       
       var received = ""
       while (!received.contains("sparkExecutorRemoved")) {
         received = readFromSocket(server)
       }
       received should include ("executorId\":\"exec1")
+      received should include ("totalCores\":0")
+      received should include ("numExecutors\":0")
     }
   }
 
