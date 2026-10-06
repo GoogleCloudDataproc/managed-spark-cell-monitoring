@@ -8,7 +8,7 @@ Leveraging [AnyWidget](https://anywidget.dev/), it enables platform-agnostic, ze
 
 ## Key Features
 
-- 📊 **Real-time Progress Tracking:** Visual progress bars for active Apache Spark jobs, stages, and tasks directly in notebook cells.
+- 📊 **Real-time Progress Tracking:** Visual progress bars for active Apache Spark jobs and their tasks directly in notebook cells.
 - ⚡ **AnyWidget Architecture:** Precompiled ESM widgets rendered natively without requiring custom JupyterLab extension binaries.
 - ⏱️ **Task Chart:** Live chart of running and scheduled tasks against available executor cores.
 
