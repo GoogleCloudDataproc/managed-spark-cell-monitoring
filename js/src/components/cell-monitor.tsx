@@ -20,7 +20,6 @@ import {useCellStore, useNotebookStore} from '../store';
 import {CellMonitorHeader} from './header';
 import {JobTable} from './job-table';
 import {LazyTaskChart} from './lazy-task-chart';
-import {LazyTimeline} from './lazy-timeline';
 
 export const CellMonitor = observer(() => {
   const notebook = useNotebookStore();
@@ -41,8 +40,6 @@ export const CellMonitor = observer(() => {
     tabContent = <JobTable />;
   } else if (cell?.view === 'taskchart') {
     tabContent = <LazyTaskChart />;
-  } else if (cell?.view === 'timeline') {
-    tabContent = <LazyTimeline />;
   }
 
   return (

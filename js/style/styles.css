@@ -113,9 +113,6 @@
   background-position: center;
   cursor: pointer;
 }
-.pm .timelinetabbuttonicon {
-  background-image: url('./icons/timeline-tab-icon.svg');
-}
 .pm .taskviewtabbuttonicon {
   background-image: url('./icons/tasks-tab-icon.svg');
 }

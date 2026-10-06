@@ -23,7 +23,7 @@ module.exports = {
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy'
   },
   transformIgnorePatterns: [
-    "node_modules/(?!(pretty-ms|parse-ms|vis-timeline|vis-data|vis-util)/)"
+    "node_modules/(?!(pretty-ms|parse-ms)/)"
   ],
   transform: {
     "^.+\\.(t|j)sx?$": ["ts-jest", {
