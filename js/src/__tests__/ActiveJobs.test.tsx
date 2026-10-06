@@ -19,7 +19,10 @@ import React from 'react';
 import { runInAction } from 'mobx';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { ACTIVE_JOB_REVEAL_DELAY_MS } from '../components/active-jobs';
-import { computeRunningSummaryParts } from '../components/active-jobs-layout';
+import {
+  computeRunningSummaryParts,
+  FAILED_DETAIL_MIN_WIDTH_PX,
+} from '../components/active-jobs-layout';
 import { CellMonitorHeader } from '../components/header';
 import { StackedProgressBar } from '../components/stacked-progress-bar';
 import { CellStoreContext, NotebookStoreContext } from '../store';
@@ -90,6 +93,12 @@ function addJob(
       notebook.jobs[job.uniqueId] = job;
       cell.uniqueJobIds.push(job.uniqueId);
     });
+  });
+}
+
+function finishCell(cell: Cell) {
+  act(() => {
+    cell.setCellFinished(true);
   });
 }
 
@@ -279,34 +288,119 @@ describe('ActiveJobs header strip', () => {
     expect(screen.getByRole('img', { name: 'Running' })).toBeInTheDocument();
   });
 
-  it('shows a single failed job with its task progress only when nothing runs', () => {
+  it('stays empty between jobs while the cell is still executing', () => {
     const { notebook, cell } = renderHeader();
     setStripWidth(1000);
+    addJob(notebook, cell, { id: 1, name: 'done', status: 'COMPLETED' });
+    addJob(notebook, cell, { id: 2, name: 'broken', status: 'FAILED' });
+    expect(screen.queryByText(/completed/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Failed|failed/)).not.toBeInTheDocument();
+  });
+
+  it('shows the number of completed jobs once the cell finished', () => {
+    const { notebook, cell } = renderHeader();
+    setStripWidth(1000);
+    addJob(notebook, cell, { id: 1, name: 'a', status: 'COMPLETED' });
+    addJob(notebook, cell, { id: 2, name: 'b', status: 'COMPLETED' });
+    addJob(notebook, cell, { id: 3, name: 'c', status: 'COMPLETED' });
+    finishCell(cell);
+    expect(screen.getByText('3 jobs completed')).toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  });
+
+  it('uses the singular for one completed job', () => {
+    const { notebook, cell } = renderHeader();
+    addJob(notebook, cell, { id: 1, name: 'only', status: 'COMPLETED' });
+    finishCell(cell);
+    expect(screen.getByText('1 job completed')).toBeInTheDocument();
+  });
+
+  it('shows nothing when the cell finished without any job', () => {
+    const { cell, container } = renderHeader();
+    finishCell(cell);
+    expect(container.querySelector('.active-job')).toBeNull();
+  });
+
+  it('keeps showing the running summary after the cell finished until jobs end', () => {
+    const { notebook, cell } = renderHeader();
+    setStripWidth(1000);
+    addJob(notebook, cell, { id: 1, name: 'async', numTasks: 4, completed: 1, active: 1 });
+    revealJobs();
+    finishCell(cell);
+    expect(screen.getByText('async')).toBeInTheDocument();
+    expect(screen.queryByText(/jobs? completed/)).not.toBeInTheDocument();
+
+    act(() => {
+      runInAction(() => {
+        notebook.jobs['nb-job-1'].status = 'COMPLETED';
+      });
+    });
+    expect(screen.queryByText('async')).not.toBeInTheDocument();
+    expect(screen.getByText('1 job completed')).toBeInTheDocument();
+  });
+
+  it('shows a single failed job by name with the completed count once the cell finished', () => {
+    const { notebook, cell } = renderHeader();
+    setStripWidth(1000);
+    addJob(notebook, cell, { id: 1, name: 'ok-1', status: 'COMPLETED' });
+    addJob(notebook, cell, { id: 2, name: 'ok-2', status: 'COMPLETED' });
     addJob(notebook, cell, {
-      id: 1,
+      id: 3,
       name: 'broken',
       status: 'FAILED',
       numTasks: 10,
       completed: 4,
     });
+    finishCell(cell);
     expect(screen.getByText('broken')).toBeInTheDocument();
     expect(screen.getByText('Failed')).toBeInTheDocument();
-    expect(screen.getByText(/· 4\/10 tasks/)).toBeInTheDocument();
+    expect(screen.getByText(/· 2 jobs completed/)).toBeInTheDocument();
+    expect(screen.queryByText(/tasks/)).not.toBeInTheDocument();
+  });
+
+  it('omits the completed count when no job completed', () => {
+    const { notebook, cell } = renderHeader();
+    setStripWidth(1000);
+    addJob(notebook, cell, { id: 1, name: 'broken', status: 'FAILED' });
+    finishCell(cell);
+    expect(screen.getByText('Failed')).toBeInTheDocument();
+    expect(screen.queryByText(/completed/)).not.toBeInTheDocument();
+  });
+
+  it('hides the completed count on narrow strips', () => {
+    const { notebook, cell } = renderHeader();
+    setStripWidth(FAILED_DETAIL_MIN_WIDTH_PX - 1);
+    addJob(notebook, cell, { id: 1, name: 'ok', status: 'COMPLETED' });
+    addJob(notebook, cell, { id: 2, name: 'broken', status: 'FAILED' });
+    finishCell(cell);
+    expect(screen.getByText('Failed')).toBeInTheDocument();
+    expect(screen.queryByText(/completed/)).not.toBeInTheDocument();
+  });
+
+  it('shows "N failed · M completed" when more than one job failed', () => {
+    const { notebook, cell } = renderHeader();
+    setStripWidth(1000);
+    addJob(notebook, cell, { id: 3, name: 'ok', status: 'COMPLETED', startTime: 3000 });
+    addJob(notebook, cell, { id: 2, name: 'second', status: 'FAILED', startTime: 2000 });
+    addJob(notebook, cell, { id: 1, name: 'first', status: 'FAILED', startTime: 1000 });
+    finishCell(cell);
+
+    const failed = screen.getByText('2 failed');
+    expect(failed.closest('.active-job')).toHaveAttribute('title', 'first\nsecond');
+    expect(screen.getByText(/· 1 completed/)).toBeInTheDocument();
+    expect(screen.queryByText('first')).not.toBeInTheDocument();
+  });
+
+  it('replaces the final summary when a new job starts running', () => {
+    const { notebook, cell } = renderHeader();
+    setStripWidth(1000);
+    addJob(notebook, cell, { id: 1, name: 'broken', status: 'FAILED' });
+    finishCell(cell);
+    expect(screen.getByText('Failed')).toBeInTheDocument();
 
     addJob(notebook, cell, { id: 2, name: 'retry' });
     expect(screen.queryByText('broken')).not.toBeInTheDocument();
     expect(screen.queryByText('Failed')).not.toBeInTheDocument();
-  });
-
-  it('shows "N failed" when more than one job failed', () => {
-    const { notebook, cell } = renderHeader();
-    setStripWidth(1000);
-    addJob(notebook, cell, { id: 2, name: 'second', status: 'FAILED', startTime: 2000 });
-    addJob(notebook, cell, { id: 1, name: 'first', status: 'FAILED', startTime: 1000 });
-
-    const failed = screen.getByText('2 failed');
-    expect(failed.closest('.active-job')).toHaveAttribute('title', 'first\nsecond');
-    expect(screen.queryByText('first')).not.toBeInTheDocument();
   });
 
   it('toggles the header collapse when the strip area is clicked', () => {
