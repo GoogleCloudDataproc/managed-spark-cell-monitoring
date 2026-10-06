@@ -48,7 +48,7 @@ describe('Header Component', () => {
     );
 
     // Verify a rendering item
-    expect(screen.getByText(/Apache Spark:/i)).toBeInTheDocument();
+    expect(screen.getByText(/Job execution/i)).toBeInTheDocument();
     
     // Switch tabs
     const taskChartTab = screen.getByTitle(/Tasks/i);

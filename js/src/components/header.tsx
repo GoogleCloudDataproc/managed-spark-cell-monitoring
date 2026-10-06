@@ -17,10 +17,23 @@
 
 import {observer} from 'mobx-react-lite';
 import {useCellStore, useNotebookStore} from '../store';
+import {ActiveJobs, useVisibleRunningJobs} from './active-jobs';
+
+const pluralize = (count: number, noun: string) =>
+  `${count} ${count === 1 ? noun : `${noun}s`}`;
 
 export const CellMonitorHeader = observer(() => {
   const notebook = useNotebookStore();
   const cell = useCellStore();
+  const runningJobs = useVisibleRunningJobs(cell);
+
+  // Executor counts only arrive from the Spark listener; Spark Connect
+  // sessions never report them, so a missing count means "don't show".
+  const numExecutors = notebook.numExecutors;
+  const showResources =
+    typeof numExecutors === 'number' &&
+    Number.isFinite(numExecutors) &&
+    runningJobs.length > 0;
 
   const isButtonActive = (view: string) =>
     !cell.isCollapsed && cell.view === view ? 'tabbuttonactive' : '';
@@ -40,54 +53,16 @@ export const CellMonitorHeader = observer(() => {
               ? 'tdstageicon'
               : 'tdstageicon tdstageiconcollapsed'
           }></span>
-        <span className="tbitem badgecontainer">
-          Apache Spark:
-          <span className="badgesspan">
-            <span className="badgeexecutor">
-              <span className="badgeexecutorcount">
-                {notebook.numExecutors}
-              </span>{' '}
-              Executors
-            </span>
-            <span className="badgeexecutorcores">
-              <span className="badgeexecutorcorescount">
-                {notebook.numTotalCores}
-              </span>{' '}
-              Cores
-            </span>
-          </span>
-          <span className="jobstag">Jobs:</span>
-          <span className="badges">
-            {cell.numActiveJobs ? (
-              <span className="badgerunning">
-                <span className="badgerunningcount">{cell.numActiveJobs}</span>{' '}
-                Running
-              </span>
-            ) : (
-              ''
-            )}
-            {cell.numCompletedJobs ? (
-              <span className="badgecompleted">
-                <span className="badgecompletedcount">
-                  {cell.numCompletedJobs}
-                </span>{' '}
-                Completed
-              </span>
-            ) : (
-              ''
-            )}
-            {cell.numFailedJobs ? (
-              <span className="badgefailed">
-                <span className="badgefailedcount">{cell.numFailedJobs}</span>{' '}
-                Failed
-              </span>
-            ) : (
-              ''
-            )}
-          </span>
-        </span>
+        <span className="tbitem badgecontainer">Job execution</span>
       </div>
+      <ActiveJobs runningJobs={runningJobs} />
       <div className="titleright">
+        {showResources && (
+          <span className="header-resources">
+            {pluralize(numExecutors, 'executor')} ·{' '}
+            {pluralize(notebook.numTotalCores || 0, 'core')}
+          </span>
+        )}
         <div className="tabbuttons">
           <span
             className={jobButtonClassNames}

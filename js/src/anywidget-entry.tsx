@@ -19,6 +19,7 @@ import {runInAction} from 'mobx';
 import {createRoot} from 'react-dom/client';
 import '../style/jobtable.css';
 import '../style/styles.css';
+import '../style/header.css';
 import '../style/timeline.css';
 import '../style/task-chart.css';
 import {CellWidget} from './components';

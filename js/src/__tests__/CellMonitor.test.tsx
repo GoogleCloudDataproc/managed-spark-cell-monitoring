@@ -58,6 +58,6 @@ describe('CellMonitor Component', () => {
       </NotebookStoreContext.Provider>
     );
     
-    expect(screen.getByText(/Jobs/i)).toBeInTheDocument();
+    expect(screen.getByText(/Job execution/i)).toBeInTheDocument();
   });
 });
