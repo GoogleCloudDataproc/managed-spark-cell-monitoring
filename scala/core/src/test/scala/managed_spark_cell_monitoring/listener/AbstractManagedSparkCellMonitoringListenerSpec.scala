@@ -91,6 +91,36 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
     }
   }
 
+  /**
+   * Reads `expectedCount` `;EOD:`-delimited messages from a single accepted connection.
+   *
+   * The listener writes every message to one persistent socket, so tests that
+   * emit more than one message must read them from the same connection instead
+   * of calling `readFromSocket` (which closes the connection) repeatedly.
+   */
+  def readMessages(server: ServerSocket, expectedCount: Int): Seq[String] = {
+    val socket = server.accept()
+    socket.setSoTimeout(5000)
+    val in = new BufferedReader(new InputStreamReader(socket.getInputStream, java.nio.charset.StandardCharsets.UTF_8))
+    try {
+      val sb = new StringBuilder()
+      var count = 0
+      var continue = true
+      while (continue && count < expectedCount) {
+        val c = in.read()
+        if (c == -1) continue = false
+        else {
+          sb.append(c.toChar)
+          if (sb.toString().endsWith(";EOD:")) count += 1
+        }
+      }
+      sb.toString().split(";EOD:").toSeq.filter(_.nonEmpty)
+    } finally {
+      in.close()
+      socket.close()
+    }
+  }
+
   it should "successfully connect and send JSON when port is provided" in {
     withListenerAndSocket { (listener, server) =>
       listener.socket shouldNot be (null)
@@ -248,7 +278,7 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
     }
   }
 
-  it should "handle onExecutorRemoved and not go negative on duplicate or untracked removals" in {
+  it should "handle onExecutorRemoved and not go negative on duplicate removals" in {
     withListenerAndSocket { (listener, server) =>
       val execInfo = new org.apache.spark.scheduler.cluster.ExecutorInfo("localhost", 4, Map.empty)
       listener.onExecutorAdded(SparkListenerExecutorAdded(900L, "exec1", execInfo))
@@ -264,14 +294,15 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
       listener.onExecutorRemoved(execRemoved)
       listener.numExecutors shouldBe 0
       listener.totalCores shouldBe 0
-      
-      var received = ""
-      while (!received.contains("sparkExecutorRemoved")) {
-        received = readFromSocket(server)
+
+      val removedMessages = readMessages(server, expectedCount = 3)
+        .filter(_.contains("sparkExecutorRemoved"))
+      removedMessages should have size 2
+      removedMessages.foreach { received =>
+        received should include ("executorId\":\"exec1")
+        received should include ("totalCores\":0")
+        received should include ("numExecutors\":0")
       }
-      received should include ("executorId\":\"exec1")
-      received should include ("totalCores\":0")
-      received should include ("numExecutors\":0")
     }
   }
 
