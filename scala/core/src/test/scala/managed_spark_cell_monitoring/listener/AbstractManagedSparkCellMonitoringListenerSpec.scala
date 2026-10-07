@@ -275,6 +275,23 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
       }
       received should include ("executorId\":\"exec1")
       received should include ("numCores\":4")
+      received should include ("totalCores\":4")
+      received should include ("numExecutors\":1")
+    }
+  }
+
+  it should "not double-count an executor that is re-added with the same id" in {
+    withListenerAndSocket { (listener, server) =>
+      val execInfo = new org.apache.spark.scheduler.cluster.ExecutorInfo("localhost", 4, Map.empty)
+      listener.onExecutorAdded(SparkListenerExecutorAdded(900L, "exec1", execInfo))
+      listener.onExecutorAdded(SparkListenerExecutorAdded(901L, "exec1", execInfo))
+      listener.numExecutors shouldBe 1
+      listener.totalCores shouldBe 4
+
+      val messages = readMessages(server, expectedCount = 2)
+      messages should have size 2
+      messages.last should include ("totalCores\":4")
+      messages.last should include ("numExecutors\":1")
     }
   }
 
@@ -303,6 +320,21 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
         received should include ("totalCores\":0")
         received should include ("numExecutors\":0")
       }
+    }
+  }
+
+  it should "not go negative when removing an executor that was never tracked" in {
+    withListenerAndSocket { (listener, server) =>
+      // Executors added before the listener was registered are never seen by
+      // onExecutorAdded but are still reported when they are removed.
+      listener.onExecutorRemoved(SparkListenerExecutorRemoved(1000L, "untracked", "reason"))
+      listener.numExecutors shouldBe 0
+      listener.totalCores shouldBe 0
+
+      val received = readFromSocket(server)
+      received should include ("sparkExecutorRemoved")
+      received should include ("totalCores\":0")
+      received should include ("numExecutors\":0")
     }
   }
 
