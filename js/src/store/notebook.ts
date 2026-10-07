@@ -106,11 +106,14 @@ export class NotebookStore {
     }
 
     // These values are set here as previous messages may
-    // be missed if reconnecting from a browser reload.
-    this.numTotalCores =
-      typeof data.totalCores === 'number' ? Math.max(0, data.totalCores) : data.totalCores;
-    this.numExecutors =
-      typeof data.numExecutors === 'number' ? Math.max(0, data.numExecutors) : data.numExecutors;
+    // be missed if reconnecting from a browser reload. Only valid numbers
+    // are applied so a payload without them cannot clear known counts.
+    if (typeof data.totalCores === 'number') {
+      this.numTotalCores = Math.max(0, data.totalCores);
+    }
+    if (typeof data.numExecutors === 'number') {
+      this.numExecutors = Math.max(0, data.numExecutors);
+    }
 
     const job = existingJob || new SparkJob(this);
     job.uniqueId = uniqueJobId;
@@ -309,28 +312,24 @@ export class NotebookStore {
   }
 
   onSparkExecutorAdded(data: any) {
-    this.numTotalCores =
-      typeof data.totalCores === 'number' ? Math.max(0, data.totalCores) : data.totalCores;
+    if (typeof data.totalCores === 'number') {
+      this.numTotalCores = Math.max(0, data.totalCores);
+    }
     if (typeof data.numExecutors === 'number') {
       this.numExecutors = Math.max(0, data.numExecutors);
     } else {
-      if (!this.numExecutors) {
-        this.numExecutors = 0;
-      }
-      this.numExecutors += 1;
+      this.numExecutors = (this.numExecutors ?? 0) + 1;
     }
   }
 
   onSparkExecutorRemoved(data: any) {
-    this.numTotalCores =
-      typeof data.totalCores === 'number' ? Math.max(0, data.totalCores) : data.totalCores;
+    if (typeof data.totalCores === 'number') {
+      this.numTotalCores = Math.max(0, data.totalCores);
+    }
     if (typeof data.numExecutors === 'number') {
       this.numExecutors = Math.max(0, data.numExecutors);
     } else {
-      if (!this.numExecutors) {
-        this.numExecutors = 0;
-      }
-      this.numExecutors = Math.max(0, this.numExecutors - 1);
+      this.numExecutors = Math.max(0, (this.numExecutors ?? 0) - 1);
     }
   }
 

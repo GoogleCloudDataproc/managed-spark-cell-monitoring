@@ -131,6 +131,17 @@ describe('MobX Store Tests', () => {
       expect(nbStore.numTotalCores).toBe(0);
     });
 
+    it('keeps known counts when a payload carries none', () => {
+      nbStore.onSparkExecutorAdded({ executorId: 'exec1', totalCores: 8, numExecutors: 2 });
+      nbStore.onSparkJobStart('cell-1', { jobId: 9, name: 'Job', stageIds: [], status: 'RUNNING' });
+      expect(nbStore.numExecutors).toBe(2);
+      expect(nbStore.numTotalCores).toBe(8);
+
+      nbStore.onSparkExecutorRemoved({ executorId: 'exec1' });
+      expect(nbStore.numExecutors).toBe(1);
+      expect(nbStore.numTotalCores).toBe(8);
+    });
+
     it('clamps negative counts from the payload to zero', () => {
       nbStore.onSparkExecutorRemoved({ executorId: 'exec1', totalCores: -4, numExecutors: -1 });
       expect(nbStore.numExecutors).toBe(0);
