@@ -20,18 +20,32 @@ import { SparkStage } from './spark-stage';
 import { SparkJob } from './spark-job';
 import { Cell } from './cell';
 
+/**
+ * Task counters of a job, summed over its stages. Skipped stages count as
+ * fully completed: Spark reuses their output without re-running them.
+ */
+type TaskTotals = {
+  numTasks: number;
+  numActiveTasks: number;
+  numCompletedTasks: number;
+  numFailedTasks: number;
+};
+
 export class NotebookStore {
-  numExecutors?: number;
-  numTotalCores?: number;
-  applicationName?: string;
-  applicationId?: string;
-  applicationAttemptId?: string;
+  // Optional fields are initialised explicitly so that MobX sees them as
+  // own properties and makes them observable (with an ES2020 target,
+  // `field?: T` without an initialiser does not create the property).
+  numExecutors: number | undefined = undefined;
+  numTotalCores: number | undefined = undefined;
+  applicationId: string | undefined = undefined;
+  applicationAttemptId: string | undefined = undefined;
   viewUrl: string | undefined = undefined;
   uniqueId = 'default-key';
   hideAllDisplays = false;
 
   cells: { [cellId: string]: Cell } = {};
   jobs: { [jobId: string]: SparkJob } = {};
+  // Stages are bookkeeping only: they feed the task totals of their job.
   stages: { [stageId: string]: SparkStage } = {};
 
   constructor(public notebookPanelId: string) {
@@ -64,7 +78,6 @@ export class NotebookStore {
 
   onSparkApplicationStart(data: any) {
     this.applicationId = data.appId;
-    this.applicationName = data.appName;
     this.applicationAttemptId = data.appAttemptId;
     this.uniqueId = `app${this.applicationId}-attempt${this.applicationAttemptId}`;
   }
@@ -97,6 +110,36 @@ export class NotebookStore {
     this.cells[cellId] = new Cell(cellId, this);
   }
 
+  private sumStageTasks(job: SparkJob): TaskTotals {
+    const totals: TaskTotals = {
+      numTasks: 0,
+      numActiveTasks: 0,
+      numCompletedTasks: 0,
+      numFailedTasks: 0,
+    };
+    job.uniqueStageIds.forEach((uniqueStageId) => {
+      const stage = this.stages[uniqueStageId];
+      if (!stage) {
+        return;
+      }
+      totals.numTasks += stage.numTasks || 0;
+      totals.numActiveTasks += stage.numActiveTasks || 0;
+      totals.numFailedTasks += stage.numFailedTasks || 0;
+      totals.numCompletedTasks +=
+        stage.status === 'SKIPPED' ? stage.numTasks || 0 : stage.numCompletedTasks || 0;
+    });
+    return totals;
+  }
+
+  /** Recomputes a job's task counters from its stages. */
+  private recomputeJobTasks(job: SparkJob) {
+    const totals = this.sumStageTasks(job);
+    job.numTasks = totals.numTasks;
+    job.numActiveTasks = totals.numActiveTasks;
+    job.numCompletedTasks = totals.numCompletedTasks;
+    job.numFailedTasks = totals.numFailedTasks;
+  }
+
   onSparkJobStart(cellId: string, data: any) {
     const uniqueJobId = `${this.uniqueId}-job-${data.jobId}`;
     const existingJob = this.jobs[uniqueJobId];
@@ -120,7 +163,7 @@ export class NotebookStore {
       this.numExecutors = Math.max(0, data.numExecutors);
     }
 
-    const job = existingJob || new SparkJob(this);
+    const job = existingJob || new SparkJob();
     job.uniqueId = uniqueJobId;
     job.jobId = data.jobId;
     if (!job.endTime) {
@@ -130,8 +173,6 @@ export class NotebookStore {
     const jobName = String(data.name).split(' at ')[0];
     job.name = jobName;
     job.startTime = new Date(data.submissionTime);
-    job.stageIds = data.stageIds;
-    job.numStages = data.stageIds.length;
     job.numTasks = data.numTasks;
 
     data.stageIds.forEach((stageId: string) => {
@@ -139,6 +180,8 @@ export class NotebookStore {
       let stage = this.stages[uniqueStageId];
       if (!stage) {
         stage = new SparkStage();
+        stage.uniqueId = uniqueStageId;
+        stage.stageId = String(stageId);
         stage.status = job.endTime ? 'SKIPPED' : 'PENDING';
         this.stages[uniqueStageId] = stage;
       }
@@ -161,29 +204,15 @@ export class NotebookStore {
         this.stages[`${this.uniqueId}-stage-${lastStageId}`]?.name || 'Job';
     }
 
-    // Re-aggregate task counts from stages in case stage updates arrived before jobStart
-    let activeTasks = 0;
-    let completedTasks = 0;
-    let failedTasks = 0;
-    let totalTasks = 0;
-    job.uniqueStageIds.forEach((uniqueStageId) => {
-      const s = this.stages[uniqueStageId];
-      if (s) {
-        activeTasks += s.numActiveTasks || 0;
-        failedTasks += s.numFailedTasks || 0;
-        totalTasks += s.numTasks || 0;
-        if (s.status === 'SKIPPED') {
-          completedTasks += s.numTasks || 0;
-        } else {
-          completedTasks += s.numCompletedTasks || 0;
-        }
-      }
-    });
-    if (totalTasks > 0) {
-      job.numTasks = totalTasks;
-      job.numActiveTasks = job.endTime ? 0 : activeTasks;
-      job.numCompletedTasks = completedTasks;
-      job.numFailedTasks = failedTasks;
+    // Re-aggregate task counts from stages in case stage updates arrived
+    // before jobStart. Keep the jobStart estimate when the stages carry no
+    // task counts yet.
+    const totals = this.sumStageTasks(job);
+    if (totals.numTasks > 0) {
+      job.numTasks = totals.numTasks;
+      job.numActiveTasks = job.endTime ? 0 : totals.numActiveTasks;
+      job.numCompletedTasks = totals.numCompletedTasks;
+      job.numFailedTasks = totals.numFailedTasks;
     }
 
     if (!this.cells[cellId]) {
@@ -201,7 +230,7 @@ export class NotebookStore {
     const uniqueId = `${this.uniqueId}-job-${data.jobId}`;
     let job = this.jobs[uniqueId];
     if (!job) {
-      job = new SparkJob(this);
+      job = new SparkJob();
       job.uniqueId = uniqueId;
       job.jobId = data.jobId;
       job.name = `Job ${data.jobId}`;
@@ -224,30 +253,12 @@ export class NotebookStore {
 
     // Re-aggregate Job stats to ensure skipped stages contribute to Job
     // progress
-    job.numActiveTasks = 0;
-    job.numCompletedTasks = 0;
-    job.numFailedTasks = 0;
-    job.numTasks = 0;
-    job.uniqueStageIds.forEach(uniqueStageId => {
-      const s = this.stages[uniqueStageId];
-      if (s) {
-        job.numActiveTasks += s.numActiveTasks || 0;
-        job.numFailedTasks += s.numFailedTasks || 0;
-        job.numTasks += s.numTasks || 0;
-        if (s.status === 'SKIPPED') {
-          job.numCompletedTasks += s.numTasks || 0;
-        } else {
-          job.numCompletedTasks += s.numCompletedTasks || 0;
-        }
-      }
-    });
+    this.recomputeJobTasks(job);
 
     job.cell?.taskChartStore.onSparkJobEnd(data);
   }
 
-  onSparkStageSubmitted(cellId: string, data: any) {
-    const submissionTime =
-      data.submissionTime === -1 ? new Date() : new Date(data.submissionTime);
+  onSparkStageSubmitted(data: any) {
     const uniqueStageId = `${this.uniqueId}-stage-${data.stageId}`;
     if (!this.stages[uniqueStageId]) {
       this.stages[uniqueStageId] = new SparkStage();
@@ -257,11 +268,8 @@ export class NotebookStore {
     if (stage.status === 'COMPLETED' || stage.status === 'SKIPPED') {
       return;
     }
-    stage.cellId = cellId;
-    stage.stageId = data.stageId;
+    stage.stageId = String(data.stageId);
     stage.status = 'RUNNING';
-    stage.name = String(data.name);
-    stage.submissionTime = submissionTime;
     stage.numTasks = data.numTasks;
   }
 
@@ -271,16 +279,13 @@ export class NotebookStore {
     if (!stage) {
       stage = new SparkStage();
       stage.uniqueId = uniqueStageId;
-      stage.stageId = data.stageId;
-      stage.name = data.name || `Stage ${data.stageId}`;
+      stage.stageId = String(data.stageId);
       this.stages[uniqueStageId] = stage;
     }
-    if (stage.status === 'COMPLETED' && stage.completionTime) {
+    if (stage.status === 'COMPLETED') {
       return;
     }
     stage.status = data.status;
-    stage.completionTime = new Date(data.completionTime);
-    stage.submissionTime = new Date(data.submissionTime);
     stage.numActiveTasks = 0;
     stage.numTasks = data.numTasks;
     stage.numCompletedTasks =
@@ -289,25 +294,7 @@ export class NotebookStore {
 
     const job = this.jobs[stage.uniqueJobId];
     if (job) {
-      job.numActiveTasks = 0;
-      job.numCompletedTasks = 0;
-      job.numFailedTasks = 0;
-      job.numTasks = 0;
-
-      // Update active/completed/failed tasks number (scan all job stages tasks stats)
-      job.uniqueStageIds.forEach((uniqueStageId) => {
-        const s = this.stages[uniqueStageId];
-        if (s) {
-          job.numActiveTasks += s.numActiveTasks || 0;
-          job.numFailedTasks += s.numFailedTasks || 0;
-          job.numTasks += s.numTasks || 0;
-          if (s.status === 'SKIPPED') {
-            job.numCompletedTasks += s.numTasks || 0;
-          } else {
-            job.numCompletedTasks += s.numCompletedTasks || 0;
-          }
-        }
-      });
+      this.recomputeJobTasks(job);
 
       // Fix the Cliff: forcefully plot the final active tasks count (should
       // be 0 for this stage)
@@ -338,30 +325,6 @@ export class NotebookStore {
     }
   }
 
-  onSparkTaskStart(data: any) {
-    const uniqueStageId = `${this.uniqueId}-stage-${data.stageId}`;
-    const stage = this.stages[uniqueStageId];
-    if (stage) {
-      const uniqueJobId = stage.uniqueJobId;
-      const job = this.jobs[uniqueJobId];
-      if (job) {
-        job.cell?.taskChartStore.onSparkTaskStart(data);
-      }
-    }
-  }
-
-  onSparkTaskEnd(data: any) {
-    const uniqueStageId = `${this.uniqueId}-stage-${data.stageId}`;
-    const stage = this.stages[uniqueStageId];
-    if (stage) {
-      const uniqueJobId = stage.uniqueJobId;
-      const job = this.jobs[uniqueJobId];
-      if (job) {
-        job.cell?.taskChartStore.onSparkTaskEnd(data);
-      }
-    }
-  }
-
   // Periodic stage updates
   onSparkStageActive(data: any) {
     const uniqueStageId = `${this.uniqueId}-stage-${data.stageId}`;
@@ -373,25 +336,7 @@ export class NotebookStore {
 
       const job = this.jobs[stage.uniqueJobId];
       if (job) {
-        job.numActiveTasks = 0;
-        job.numCompletedTasks = 0;
-        job.numFailedTasks = 0;
-        job.numTasks = 0;
-
-        // Update active/completed/failed tasks number (scan all job stages tasks stats)
-        job.uniqueStageIds.forEach(uStageId => {
-          const s = this.stages[uStageId];
-          if (s) {
-            job.numActiveTasks += s.numActiveTasks || 0;
-            job.numFailedTasks += s.numFailedTasks || 0;
-            job.numTasks += s.numTasks || 0;
-            if (s.status === 'SKIPPED') {
-              job.numCompletedTasks += s.numTasks || 0;
-            } else {
-              job.numCompletedTasks += s.numCompletedTasks || 0;
-            }
-          }
-        });
+        this.recomputeJobTasks(job);
 
         const time = data.time || data.timestamp || Date.now();
         job.cell?.taskChartStore.onSparkStageActive(time, job.numActiveTasks);

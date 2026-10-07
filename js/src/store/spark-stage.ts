@@ -15,12 +15,14 @@
  * limitations under the License.
  */
 
-import { makeAutoObservable } from 'mobx';
-
+/**
+ * Per-stage task counters. Stages are not rendered anywhere; they only feed
+ * the task totals of the job that owns them (see NotebookStore), so this is
+ * a plain object rather than a MobX observable.
+ */
 export class SparkStage {
   uniqueId!: string;
   uniqueJobId!: string;
-  cellId!: string;
   stageId!: string;
   status!:
     | 'Unknown'
@@ -35,10 +37,4 @@ export class SparkStage {
   numActiveTasks = 0;
   numCompletedTasks = 0;
   numFailedTasks = 0;
-  submissionTime!: Date;
-  completionTime?: Date;
-
-  constructor() {
-    makeAutoObservable(this);
-  }
 }

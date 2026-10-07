@@ -41,7 +41,7 @@ function routeSparkMessageToStore(
         notebookStore.onSparkJobEnd(msg);
         break;
       case 'sparkStageSubmitted':
-        notebookStore.onSparkStageSubmitted(cellId, msg);
+        notebookStore.onSparkStageSubmitted(msg);
         break;
       case 'sparkStageCompleted':
         notebookStore.onSparkStageCompleted(msg);
