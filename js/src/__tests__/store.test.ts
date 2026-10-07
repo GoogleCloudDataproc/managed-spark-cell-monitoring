@@ -19,6 +19,7 @@ import { autorun, isObservableProp } from 'mobx';
 import { Cell } from '../store/cell';
 import { NotebookStore } from '../store/notebook';
 import { SparkJob } from '../store/spark-job';
+import { SparkStage } from '../store/spark-stage';
 
 describe('MobX Store Tests', () => {
   let nbStore: NotebookStore;
@@ -83,9 +84,14 @@ describe('MobX Store Tests', () => {
       numTasks: 10,
       numCompletedTasks: 9,
       numFailedTasks: 1,
+      submissionTime: 1500,
       completionTime: 2000,
     });
     expect(nbStore.stages['test-nb-stage-1'].status).toBe('COMPLETED');
+    // Timing metadata is retained for a future timeline view.
+    expect(nbStore.stages['test-nb-stage-1'].name).toBe('stage one');
+    expect(nbStore.stages['test-nb-stage-1'].submissionTime?.getTime()).toBe(1500);
+    expect(nbStore.stages['test-nb-stage-1'].completionTime?.getTime()).toBe(2000);
     expect(job.numActiveTasks).toBe(0);
     expect(job.numCompletedTasks).toBe(9);
 
@@ -264,10 +270,13 @@ describe('MobX Store Tests', () => {
     expect(cell.taskChartStore.taskDataY[cell.taskChartStore.taskDataY.length - 1]).toBe(3);
   });
 
-  it('makes optional job and notebook fields observable', () => {
+  it('makes optional job, stage and notebook fields observable', () => {
     const job = new SparkJob();
     expect(isObservableProp(job, 'endTime')).toBe(true);
     expect(isObservableProp(nbStore, 'numExecutors')).toBe(true);
+    const stage = new SparkStage();
+    expect(isObservableProp(stage, 'submissionTime')).toBe(true);
+    expect(isObservableProp(stage, 'completionTime')).toBe(true);
 
     const seen: Array<Date | undefined> = [];
     const dispose = autorun(() => seen.push(job.endTime));

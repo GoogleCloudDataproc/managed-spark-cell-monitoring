@@ -45,7 +45,8 @@ export class NotebookStore {
 
   cells: { [cellId: string]: Cell } = {};
   jobs: { [jobId: string]: SparkJob } = {};
-  // Stages are bookkeeping only: they feed the task totals of their job.
+  // Stages feed the task totals of their job; their timing metadata is kept
+  // for a future timeline view (no current view renders stages).
   stages: { [stageId: string]: SparkStage } = {};
 
   constructor(public notebookPanelId: string) {
@@ -270,12 +271,13 @@ export class NotebookStore {
     }
     stage.stageId = String(data.stageId);
     stage.status = 'RUNNING';
+    stage.submissionTime =
+      data.submissionTime === -1 ? new Date() : new Date(data.submissionTime);
     stage.numTasks = data.numTasks;
 
-    // Stages are plain objects, so the owning job's totals must be refreshed
-    // explicitly: the submitted task count can differ from the jobStart
-    // estimate (e.g. adaptive execution) and would otherwise stay stale until
-    // the next stage update.
+    // Job totals are stored values, so refresh them explicitly: the submitted
+    // task count can differ from the jobStart estimate (e.g. adaptive
+    // execution) and would otherwise stay stale until the next stage update.
     const job = this.jobs[stage.uniqueJobId];
     if (job) {
       this.recomputeJobTasks(job);
@@ -295,6 +297,8 @@ export class NotebookStore {
       return;
     }
     stage.status = data.status;
+    stage.completionTime = new Date(data.completionTime);
+    stage.submissionTime = new Date(data.submissionTime);
     stage.numActiveTasks = 0;
     stage.numTasks = data.numTasks;
     stage.numCompletedTasks =

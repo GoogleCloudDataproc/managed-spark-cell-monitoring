@@ -15,10 +15,13 @@
  * limitations under the License.
  */
 
+import { makeAutoObservable } from 'mobx';
+
 /**
- * Per-stage task counters. Stages are not rendered anywhere; they only feed
- * the task totals of the job that owns them (see NotebookStore), so this is
- * a plain object rather than a MobX observable.
+ * Per-stage state. Today stages only feed the task totals of the job that
+ * owns them (see NotebookStore); no view renders them since the Event
+ * Timeline tab was removed. Their timing metadata is still recorded and
+ * observable so a future timeline view only needs UI work.
  */
 export class SparkStage {
   uniqueId!: string;
@@ -37,4 +40,11 @@ export class SparkStage {
   numActiveTasks = 0;
   numCompletedTasks = 0;
   numFailedTasks = 0;
+  // Initialised explicitly so MobX observes them (see NotebookStore).
+  submissionTime: Date | undefined = undefined;
+  completionTime: Date | undefined = undefined;
+
+  constructor() {
+    makeAutoObservable(this);
+  }
 }
