@@ -18,9 +18,11 @@
 import React from 'react';
 
 /**
- * Tracks the rendered width (in whole pixels) of the element attached to the
- * returned ref. Updates are driven by ResizeObserver, which already delivers
- * at most one notification per frame, so no extra throttling is needed.
+ * Tracks the rendered border-box width (in whole pixels) of the element
+ * attached to the returned ref. The same measurement is used on mount and on
+ * every ResizeObserver notification so the value never jumps by the element's
+ * padding. ResizeObserver already delivers at most one notification per frame,
+ * so no extra throttling is needed.
  */
 export function useElementWidth<T extends HTMLElement>(): [React.RefObject<T>, number] {
   const ref = React.useRef<T>(null);
@@ -31,17 +33,13 @@ export function useElementWidth<T extends HTMLElement>(): [React.RefObject<T>, n
     if (!element) {
       return;
     }
-    setWidth(Math.floor(element.getBoundingClientRect().width));
+    const measure = () => setWidth(Math.floor(element.getBoundingClientRect().width));
+    measure();
 
     if (typeof ResizeObserver === 'undefined') {
       return;
     }
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[entries.length - 1];
-      if (entry) {
-        setWidth(Math.floor(entry.contentRect.width));
-      }
-    });
+    const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
   }, []);

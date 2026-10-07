@@ -27,24 +27,30 @@ import { Cell } from '../store/cell';
 import { NotebookStore } from '../store/notebook';
 import { SparkJob } from '../store/spark-job';
 
-type ResizeCallback = (entries: Array<{ contentRect: { width: number } }>) => void;
+type ResizeCallback = () => void;
 
-let resizeCallbacks: ResizeCallback[] = [];
+let observed: Array<{ element: Element; callback: ResizeCallback }> = [];
 const originalResizeObserver = window.ResizeObserver;
 
 class MockResizeObserver {
-  constructor(callback: ResizeCallback) {
-    resizeCallbacks.push(callback);
+  constructor(private readonly callback: ResizeCallback) {}
+  observe(element: Element) {
+    observed.push({ element, callback: this.callback });
   }
-  observe() {}
   unobserve() {}
   disconnect() {}
 }
 
-/** Simulates the browser reporting a new width for the active-job strip. */
+/**
+ * Simulates the browser laying out the active-job strip at a new width: the
+ * hook re-measures the element's border box when ResizeObserver fires.
+ */
 const setStripWidth = (width: number) => {
   act(() => {
-    resizeCallbacks.forEach((callback) => callback([{ contentRect: { width } }]));
+    observed.forEach(({ element, callback }) => {
+      element.getBoundingClientRect = () => ({ width }) as DOMRect;
+      callback();
+    });
   });
 };
 
@@ -156,7 +162,7 @@ describe('StackedProgressBar', () => {
 describe('ActiveJobs header strip', () => {
   beforeEach(() => {
     jest.useFakeTimers();
-    resizeCallbacks = [];
+    observed = [];
     window.ResizeObserver = MockResizeObserver as unknown as typeof ResizeObserver;
   });
 
