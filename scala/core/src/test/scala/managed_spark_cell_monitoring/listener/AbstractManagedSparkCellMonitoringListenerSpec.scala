@@ -130,7 +130,11 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
 
       val received = readFromSocket(server)
       received should include ("sparkApplicationStart")
-      received should include ("test-app")
+      received should include ("appId\":\"app-123")
+      received should include ("appAttemptId")
+      received shouldNot include ("appName")
+      received shouldNot include ("sparkUser")
+      received shouldNot include ("startTime")
       received should include (";EOD:")
     }
   }
@@ -153,6 +157,11 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
         received = readFromSocket(server)
       }
       received should include ("jobId\":1")
+      received should include ("name\":\"stage1")
+      received should include ("numTasks\":5")
+      received shouldNot include ("attemptId")
+      received shouldNot include ("completionTime")
+      listener.jobIdToData should contain key 1
     }
   }
 
@@ -167,6 +176,28 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
       }
       received should include ("jobId\":1")
       received should include ("COMPLETED")
+      received should include ("completionTime\":1000")
+    }
+  }
+
+  it should "release job data on onJobEnd" in {
+    withListenerAndSocket { (listener, server) =>
+      val stageInfo = mock[StageInfo]
+      when(stageInfo.stageId).thenReturn(1)
+      when(stageInfo.completionTime).thenReturn(None)
+      when(stageInfo.submissionTime).thenReturn(None)
+      when(stageInfo.name).thenReturn("stage1")
+      when(stageInfo.numTasks).thenReturn(5)
+
+      listener.onJobStart(SparkListenerJobStart(7, 1000L, Seq(stageInfo), new Properties()))
+      listener.jobIdToData should contain key 7
+
+      listener.onJobEnd(SparkListenerJobEnd(7, 2000L, JobSucceeded))
+      listener.jobIdToData shouldNot contain key 7
+
+      // Drain the single connection; both messages share one stream and the
+      // helper reads up to the first EOD marker.
+      readFromSocket(server) should include ("sparkJobStart")
     }
   }
 
@@ -188,6 +219,10 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
         received = readFromSocket(server)
       }
       received should include ("stageId\":1")
+      received should include ("numTasks\":5")
+      received shouldNot include ("stageAttemptId")
+      received shouldNot include ("parentIds")
+      received shouldNot include ("submissionTime")
     }
   }
 
@@ -209,6 +244,10 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
         received = readFromSocket(server)
       }
       received should include ("stageId\":1")
+      received should include ("completionTime\":1000")
+      received should include ("COMPLETED")
+      received shouldNot include ("stageAttemptId")
+      received shouldNot include ("submissionTime")
     }
   }
 
@@ -250,16 +289,13 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
   }
 
 
-  it should "handle onApplicationEnd" in {
+  it should "close the connection on onApplicationEnd without sending a message" in {
     withListenerAndSocket { (listener, server) =>
       val appEnd = SparkListenerApplicationEnd(1000L)
       listener.onApplicationEnd(appEnd)
-      
-      var received = ""
-      while (!received.contains("sparkApplicationEnd")) {
-        received = readFromSocket(server)
-      }
-      received should include ("endTime\":1000")
+
+      listener.socket should be (null)
+      listener.out should be (null)
     }
   }
 
@@ -273,10 +309,11 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
       while (!received.contains("sparkExecutorAdded")) {
         received = readFromSocket(server)
       }
-      received should include ("executorId\":\"exec1")
-      received should include ("numCores\":4")
       received should include ("totalCores\":4")
       received should include ("numExecutors\":1")
+      received shouldNot include ("executorId")
+      received shouldNot include ("numCores")
+      received shouldNot include ("host")
     }
   }
 
@@ -316,7 +353,7 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
         .filter(_.contains("sparkExecutorRemoved"))
       removedMessages should have size 2
       removedMessages.foreach { received =>
-        received should include ("executorId\":\"exec1")
+        received shouldNot include ("executorId")
         received should include ("totalCores\":0")
         received should include ("numExecutors\":0")
       }
@@ -335,6 +372,7 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
       received should include ("sparkExecutorRemoved")
       received should include ("totalCores\":0")
       received should include ("numExecutors\":0")
+      received shouldNot include ("executorId")
     }
   }
 
@@ -359,9 +397,6 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
     withListenerAndSocket { (listener, server) =>
       val stageInfo = mock[StageInfo]
       when(stageInfo.stageId).thenReturn(5)
-      when(stageInfo.name).thenReturn("active-stage")
-      when(stageInfo.parentIds).thenReturn(Seq.empty)
-      when(stageInfo.numTasks).thenReturn(10)
 
       listener.activeStages(5) = stageInfo
       listener.onStageStatusActive()
@@ -370,7 +405,13 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
       while (!received.contains("sparkStageActive")) {
         received = readFromSocket(server)
       }
-      received should include ("active-stage")
+      received should include ("stageId\":5")
+      received should include ("numActiveTasks")
+      received should include ("numCompletedTasks")
+      received should include ("numFailedTasks")
+      received shouldNot include ("stageAttemptId")
+      received shouldNot include ("parentIds")
+      received shouldNot include ("\"name\"")
     }
   }
 }

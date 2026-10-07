@@ -182,8 +182,6 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
   var appId: String = ""
 
   // Jobs
-  val completedJobs = ListBuffer[JobUIData]()
-  val failedJobs = ListBuffer[JobUIData]()
   val jobIdToData = new HashMap[JobId, JobUIData]
 
   // Stages
@@ -197,7 +195,6 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
 
   // Configuration and Execution State
   val retainedStages = conf.getInt("spark.ui.retainedStages", 1000)
-  val retainedJobs = conf.getInt("spark.ui.retainedJobs", 1000)
 
   val executorCores = new HashMap[String, Int]
   @volatile var totalCores: Int = 0
@@ -206,16 +203,13 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
   /**
    * Called when a spark application starts.
    *
-   * The application start time and app ID are obtained here.
+   * The app ID is obtained here.
    */
   override def onApplicationStart(appStarted: SparkListenerApplicationStart): Unit = {
     appId = appStarted.appId.getOrElse("null")
     val json = ("msgtype" -> "sparkApplicationStart") ~
-      ("startTime" -> appStarted.time) ~
       ("appId" -> appId) ~
-      ("appAttemptId" -> appStarted.appAttemptId.getOrElse("null")) ~
-      ("appName" -> appStarted.appName) ~
-      ("sparkUser" -> appStarted.sparkUser)
+      ("appAttemptId" -> appStarted.appAttemptId.getOrElse("null"))
 
     send(compact(render(json)))
   }
@@ -223,27 +217,18 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
   /**
    * Called when a spark application ends.
    *
-   * Closes the socket connection to the kernel.
+   * Closes the socket connection to the kernel. No message is sent: the
+   * kernel and frontend do not consume an application-end event.
    */
   override def onApplicationEnd(appEnded: SparkListenerApplicationEnd): Unit = {
-    val json = ("msgtype" -> "sparkApplicationEnd") ~
-      ("endTime" -> appEnded.time)
-
-    send(compact(render(json)))
     closeConnection()
   }
 
   /** Converts stageInfo object to a JSON object. */
   def stageInfoToJSON(stageInfo: StageInfo): JObject = {
-    val completionTime: Long = stageInfo.completionTime.getOrElse(-1)
-    val submissionTime: Long = stageInfo.submissionTime.getOrElse(-1)
-
     (stageInfo.stageId.toString ->
-      ("attemptId" -> getStageAttemptNumber(stageInfo)) ~
       ("name" -> stageInfo.name) ~
-      ("numTasks" -> stageInfo.numTasks) ~
-      ("completionTime" -> completionTime) ~
-      ("submissionTime" -> submissionTime))
+      ("numTasks" -> stageInfo.numTasks))
   }
 
   /**
@@ -304,18 +289,13 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
 
   /** Called when a job ends. */
   override def onJobEnd(jobEnd: SparkListenerJobEnd): Unit = synchronized {
-    val jobData = jobIdToData.getOrElse(jobEnd.jobId, new JobUIData(jobId = jobEnd.jobId))
+    // The job's data is no longer needed once the end event is processed.
+    val jobData = jobIdToData.remove(jobEnd.jobId)
+      .getOrElse(new JobUIData(jobId = jobEnd.jobId))
     jobData.completionTime = Option(jobEnd.time).filter(_ >= 0)
-    var status = "null"
-    jobEnd.jobResult match {
-      case JobSucceeded =>
-        completedJobs += jobData
-        trimJobsIfNecessary(completedJobs)
-        status = "COMPLETED"
-      case _ =>
-        failedJobs += jobData
-        trimJobsIfNecessary(failedJobs)
-        status = "FAILED"
+    val status = jobEnd.jobResult match {
+      case JobSucceeded => "COMPLETED"
+      case _ => "FAILED"
     }
     for (stageId <- jobData.stageIds) {
       stageIdToActiveJobIds.get(stageId).foreach { jobsUsingStage =>
@@ -365,12 +345,9 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
     val jobIds = stageIdToActiveJobIds.get(stage.stageId)
 
     val completionTime: Long = stage.completionTime.getOrElse(-1)
-    val submissionTime: Long = stage.submissionTime.getOrElse(-1)
     val json = ("msgtype" -> "sparkStageCompleted") ~
       ("stageId" -> stage.stageId) ~
-      ("stageAttemptId" -> getStageAttemptNumber(stage)) ~
       ("completionTime" -> completionTime) ~
-      ("submissionTime" -> submissionTime) ~
       ("numTasks" -> stage.numTasks) ~
       ("numFailedTasks" -> stageData.numFailedTasks) ~
       ("numCompletedTasks" -> stageData.numCompletedTasks) ~
@@ -388,16 +365,10 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
     val stageData = stageIdToData.getOrElseUpdate(
       (stage.stageId, getStageAttemptNumber(stage)), new StageUIData)
 
-    val activeJobsDependentOnStage = stageIdToActiveJobIds.get(stage.stageId)
-    val jobIds = activeJobsDependentOnStage
-    val submissionTime: Long = stage.submissionTime.getOrElse(-1)
+    val jobIds = stageIdToActiveJobIds.get(stage.stageId)
     val json = ("msgtype" -> "sparkStageSubmitted") ~
       ("stageId" -> stage.stageId) ~
-      ("stageAttemptId" -> getStageAttemptNumber(stage)) ~
-      ("name" -> stage.name) ~
       ("numTasks" -> stage.numTasks) ~
-      ("parentIds" -> stage.parentIds) ~
-      ("submissionTime" -> submissionTime) ~
       ("jobIds" -> jobIds)
     send(compact(render(json)))
   }
@@ -425,10 +396,6 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
 
         val json = ("msgtype" -> "sparkStageActive") ~
           ("stageId" -> stageInfo.stageId) ~
-          ("stageAttemptId" -> getStageAttemptNumber(stageInfo)) ~
-          ("name" -> stageInfo.name) ~
-          ("parentIds" -> stageInfo.parentIds) ~
-          ("numTasks" -> stageInfo.numTasks) ~
           ("numActiveTasks" -> currentActive) ~
           ("numFailedTasks" -> currentFailed) ~
           ("numCompletedTasks" -> currentCompleted) ~
@@ -486,18 +453,6 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
     }
   }
 
-  /** If stored jobs data is too large, remove and garbage collect old jobs */
-  private def trimJobsIfNecessary(jobs: ListBuffer[JobUIData]) = synchronized {
-    if (jobs.size > retainedJobs) {
-      val toRemove = calculateNumberToRemove(jobs.size, retainedJobs)
-      jobs.take(toRemove).foreach { job =>
-        // Remove the job's UI data, if it exists
-        jobIdToData.remove(job.jobId)
-      }
-      removeFirstNElements(jobs, toRemove)
-    }
-  }
-
   /** Calculate number of items to remove from stored data. */
   private def calculateNumberToRemove(dataSize: Int, retainedSize: Int): Int = {
     math.max(retainedSize / 10, dataSize - retainedSize)
@@ -515,10 +470,6 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
     totalCores += cores
     numExecutors += 1
     val json = ("msgtype" -> "sparkExecutorAdded") ~
-      ("executorId" -> execId) ~
-      ("time" -> executorAdded.time) ~
-      ("host" -> executorAdded.executorInfo.executorHost) ~
-      ("numCores" -> cores) ~
       ("totalCores" -> totalCores) ~ // Sending this as browser data can be lost during reloads
       ("numExecutors" -> numExecutors)
 
@@ -533,11 +484,8 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
       numExecutors = math.max(0, numExecutors - 1)
     }
     val json = ("msgtype" -> "sparkExecutorRemoved") ~
-      ("executorId" -> executorRemoved.executorId) ~
-      ("time" -> executorRemoved.time) ~
       ("totalCores" -> totalCores) ~ // Sending this as browser data can be lost during reloads
       ("numExecutors" -> numExecutors)
-
 
     send(compact(render(json)))
   }
