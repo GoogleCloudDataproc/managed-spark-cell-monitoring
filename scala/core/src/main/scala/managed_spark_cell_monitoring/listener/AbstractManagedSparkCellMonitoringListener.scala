@@ -362,8 +362,6 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
     val stage = stageSubmitted.stageInfo
     activeStages(stage.stageId) = stage
     stageIdToInfo(stage.stageId) = stage
-    val stageData = stageIdToData.getOrElseUpdate(
-      (stage.stageId, getStageAttemptNumber(stage)), new StageUIData)
 
     val jobIds = stageIdToActiveJobIds.get(stage.stageId)
     val json = ("msgtype" -> "sparkStageSubmitted") ~
