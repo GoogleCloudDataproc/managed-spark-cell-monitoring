@@ -344,10 +344,13 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
 
     val jobIds = stageIdToActiveJobIds.get(stage.stageId)
 
+    // Stage timing is kept for a future timeline view in the widget.
     val completionTime: Long = stage.completionTime.getOrElse(-1)
+    val submissionTime: Long = stage.submissionTime.getOrElse(-1)
     val json = ("msgtype" -> "sparkStageCompleted") ~
       ("stageId" -> stage.stageId) ~
       ("completionTime" -> completionTime) ~
+      ("submissionTime" -> submissionTime) ~
       ("numTasks" -> stage.numTasks) ~
       ("numFailedTasks" -> stageData.numFailedTasks) ~
       ("numCompletedTasks" -> stageData.numCompletedTasks) ~
@@ -364,9 +367,12 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
     stageIdToInfo(stage.stageId) = stage
 
     val jobIds = stageIdToActiveJobIds.get(stage.stageId)
+    // Stage timing is kept for a future timeline view in the widget.
+    val submissionTime: Long = stage.submissionTime.getOrElse(-1)
     val json = ("msgtype" -> "sparkStageSubmitted") ~
       ("stageId" -> stage.stageId) ~
       ("numTasks" -> stage.numTasks) ~
+      ("submissionTime" -> submissionTime) ~
       ("jobIds" -> jobIds)
     send(compact(render(json)))
   }

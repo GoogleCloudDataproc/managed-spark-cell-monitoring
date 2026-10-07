@@ -222,7 +222,7 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
       received should include ("numTasks\":5")
       received shouldNot include ("stageAttemptId")
       received shouldNot include ("parentIds")
-      received shouldNot include ("submissionTime")
+      received should include ("submissionTime\":500")
     }
   }
 
@@ -247,7 +247,7 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
       received should include ("completionTime\":1000")
       received should include ("COMPLETED")
       received shouldNot include ("stageAttemptId")
-      received shouldNot include ("submissionTime")
+      received should include ("submissionTime\":500")
     }
   }
 
