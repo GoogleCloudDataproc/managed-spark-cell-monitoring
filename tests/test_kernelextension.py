@@ -322,3 +322,61 @@ def test_off_gce_fallback_no_url(monitor_extension, tmp_path):
 
   assert monitor_extension.env_type == "unknown"
   assert monitor_extension.spark_ui_url == ""
+
+
+@pytest.mark.parametrize(
+    "conf_line, expected",
+    [
+        ("spark.dataproc.appContext.enabled true", True),
+        ("spark.dataproc.appContext.enabled=false", False),
+        ("spark.dataproc.appContext.enabled = false", False),
+        ("spark.dataproc.appContext.enabled\tTRUE", True),
+    ],
+)
+def test_read_spark_defaults_app_context_formats(tmp_path, conf_line, expected):
+  """Test spark-defaults.conf parsing for all key/value separators Spark accepts."""
+  conf = tmp_path / "spark-defaults.conf"
+  conf.write_text(
+      "# comment\n"
+      "\n"
+      "spark.other.setting = 1\n"
+      f"{conf_line}\n"
+  )
+  assert (
+      kernelextension.CellMonitorExtension._read_spark_defaults_app_context(
+          str(conf)
+      )
+      is expected
+  )
+
+
+def test_read_spark_defaults_app_context_defaults_to_true(tmp_path):
+  """Test missing file or missing key leaves app context enabled."""
+  read = kernelextension.CellMonitorExtension._read_spark_defaults_app_context
+  assert read(str(tmp_path / "missing.conf")) is True
+  conf = tmp_path / "spark-defaults.conf"
+  conf.write_text("spark.other.setting=true\n")
+  assert read(str(conf)) is True
+
+
+def test_pre_run_cell_hook_seeds_widget_with_current_spark_ui_url(
+    monitor_extension,
+):
+  """Test a widget created after the URL resolved starts with that URL."""
+  monitor_extension.env_type = "s8s"
+  monitor_extension.project_id = "my-gcp-project"
+  monitor_extension.region = "us-central1"
+  monitor_extension.dataproc_session_id = "sess-abc-123"
+  monitor_extension._refresh_spark_ui_url()
+  expected_url = monitor_extension.spark_ui_url
+  assert expected_url.startswith("https://console.cloud.google.com/")
+
+  mock_pyspark_sql = mock.MagicMock()
+  mock_pyspark_sql.SparkSession.getActiveSession.return_value = None
+  mock_pyspark_sql.SparkSession.getDefaultSession.return_value = None
+  with mock.patch("IPython.display.display"), mock.patch.dict(
+      "sys.modules", {"pyspark": mock.MagicMock(), "pyspark.sql": mock_pyspark_sql}
+  ):
+    monitor_extension.pre_run_cell_hook()
+  widget = monitor_extension.active_widgets[monitor_extension.run_id]
+  assert widget.spark_ui_url == expected_url

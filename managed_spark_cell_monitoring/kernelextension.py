@@ -148,14 +148,13 @@ class CellMonitorExtension:
           line = raw_line.strip()
           if not line or line.startswith('#'):
             continue
-          parts = line.split(None, 1)
-          if len(parts) < 2:
-            parts = [p.strip() for p in line.split('=', 1)]
-          if (
-              len(parts) == 2
-              and parts[0] == 'spark.dataproc.appContext.enabled'
-          ):
-            return parts[1].strip().lower() == 'true'
+          # Spark accepts "key value", "key=value" and "key = value".
+          if '=' in line:
+            key, _, value = line.partition('=')
+          else:
+            key, value = (line.split(None, 1) + [''])[:2]
+          if key.strip() == 'spark.dataproc.appContext.enabled':
+            return value.strip().lower() == 'true'
     except Exception:  # pylint: disable=broad-exception-caught
       pass
     return True
@@ -255,8 +254,11 @@ class CellMonitorExtension:
       if new_url == self.spark_ui_url:
         return
       self.spark_ui_url = new_url
+      # Snapshot under the lock so a widget registered concurrently by
+      # pre_run_cell_hook either appears here or reads the new URL itself.
+      widgets = list(self.active_widgets.values())
 
-    for widget in list(self.active_widgets.values()):
+    for widget in widgets:
       widget.spark_ui_url = new_url
 
   def _resolve_widget(self, target_id):
@@ -406,19 +408,15 @@ class CellMonitorExtension:
     except Exception as e:  # pylint: disable=broad-exception-caught
       logger.debug('Could not set job group in pre-run: %s', e)
 
-    with self._env_lock:
-      current_url = self.spark_ui_url
     widget = ManagedSparkCellWidget(
-        run_id=self.run_id,
-        session_id=self.global_session_id,
-        spark_ui_url=current_url,
+        run_id=self.run_id, session_id=self.global_session_id
     )
     widget.cell_finished = False
-    self.active_widgets[self.run_id] = widget
+    # Seed the URL and register the widget atomically with respect to
+    # _refresh_spark_ui_url so no update can slip between the two steps.
     with self._env_lock:
-      latest_url = self.spark_ui_url
-    if widget.spark_ui_url != latest_url:
-      widget.spark_ui_url = latest_url
+      widget.spark_ui_url = self.spark_ui_url
+      self.active_widgets[self.run_id] = widget
     IPython.display.display(widget)
 
   def post_run_cell_hook(self, result):
