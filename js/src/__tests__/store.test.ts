@@ -98,6 +98,25 @@ describe('MobX Store Tests', () => {
     expect(job.numCompletedTasks).toBe(13);
   });
 
+  it('refreshes job totals when a stage is submitted with a different task count', () => {
+    nbStore.onSparkJobStart('cell-1', {
+      msgtype: 'sparkJobStart',
+      jobId: 1,
+      name: 'Test Job',
+      stageIds: [1, 2],
+      stageInfos: { 1: { numTasks: 10, name: 'stage one' }, 2: { numTasks: 4, name: 'stage two' } },
+      numTasks: 14,
+      status: 'RUNNING',
+      submissionTime: 1000,
+    });
+    const job = nbStore.jobs['test-nb-job-1'];
+    expect(job.numTasks).toBe(14);
+
+    // Adaptive execution submits stage 2 with more tasks than planned.
+    nbStore.onSparkStageSubmitted({ msgtype: 'sparkStageSubmitted', stageId: 2, numTasks: 6 });
+    expect(job.numTasks).toBe(16);
+  });
+
   it('ignores a replayed stage completion and a replayed job end', () => {
     nbStore.onSparkJobStart('cell-1', {
       jobId: 1,

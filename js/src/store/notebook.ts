@@ -271,6 +271,15 @@ export class NotebookStore {
     stage.stageId = String(data.stageId);
     stage.status = 'RUNNING';
     stage.numTasks = data.numTasks;
+
+    // Stages are plain objects, so the owning job's totals must be refreshed
+    // explicitly: the submitted task count can differ from the jobStart
+    // estimate (e.g. adaptive execution) and would otherwise stay stale until
+    // the next stage update.
+    const job = this.jobs[stage.uniqueJobId];
+    if (job) {
+      this.recomputeJobTasks(job);
+    }
   }
 
   onSparkStageCompleted(data: any) {
