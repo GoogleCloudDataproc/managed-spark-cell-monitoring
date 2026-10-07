@@ -26,9 +26,10 @@ const EMPTY_VALUE = '\u2014'; // em dash
 
 /**
  * True when the date is a real timestamp. Rejects undefined, Invalid Date and
- * the Unix epoch, which is what an absent `submissionTime` decodes to.
+ * the Unix epoch, which is what an absent `submissionTime`/`completionTime`
+ * decodes to.
  */
-export function isValidStartTime(date: Date | undefined): date is Date {
+export function isValidTimestamp(date: Date | undefined): date is Date {
   return !!date && date.getTime() > 0;
 }
 
@@ -38,7 +39,7 @@ export function isValidStartTime(date: Date | undefined): date is Date {
  * as epoch milliseconds, so Intl renders it in the browser's time zone.
  */
 export function formatStartTime(date: Date | undefined): string {
-  if (!isValidStartTime(date)) {
+  if (!isValidTimestamp(date)) {
     return EMPTY_VALUE;
   }
   return date.toLocaleTimeString(undefined, {
@@ -50,7 +51,7 @@ export function formatStartTime(date: Date | undefined): string {
 
 /** Full date and time for the Start Time tooltip, e.g. "Oct 6, 2026, 3:36:03 PM". */
 export function formatStartTimestamp(date: Date | undefined): string {
-  if (!isValidStartTime(date)) {
+  if (!isValidTimestamp(date)) {
     return '';
   }
   return date.toLocaleString(undefined, {
@@ -65,9 +66,11 @@ const JobItem = observer((props: { jobId: string }) => {
   if (!job) {
     return null;
   }
+  // Both ends must be real timestamps; clamp so clock skew between the
+  // driver's submission and completion times can never show as negative.
   const durationMs =
-    job.endTime && isValidStartTime(job.startTime)
-      ? job.endTime.getTime() - job.startTime.getTime()
+    isValidTimestamp(job.endTime) && isValidTimestamp(job.startTime)
+      ? Math.max(0, job.endTime.getTime() - job.startTime.getTime())
       : NaN;
   return (
     <tr className="jobrow">
@@ -76,7 +79,7 @@ const JobItem = observer((props: { jobId: string }) => {
         {formatStartTime(job.startTime)}
       </td>
       <td className="tdjobstatus">
-        <span className={'tditemjobstatus ' + job.status}>
+        <span className={'tditemjobstatus ' + String(job.status).toLowerCase()}>
           {job.status
             ? String(job.status).charAt(0).toUpperCase() +
               String(job.status).slice(1).toLowerCase()

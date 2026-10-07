@@ -30,7 +30,7 @@ import { SparkJob } from '../store/spark-job';
 
 jest.mock('pretty-ms', () => ({
   __esModule: true,
-  default: () => "mock-time"
+  default: (ms: number) => `mock-time:${ms}`,
 }));
 
 function renderTable(startTime = new Date(2025, 0, 1, 15, 36, 3)) {
@@ -112,6 +112,51 @@ describe('JobTable Component', () => {
     expect(container.querySelector('.tdjobstarttime')).toHaveAttribute('title', '');
     // No "56 years" duration measured from the epoch.
     expect(container.querySelector('.tdjobduration')).toHaveTextContent('-');
+  });
+
+  it('shows a placeholder when the end time is the epoch or invalid', () => {
+    const { container, job } = renderTable();
+    act(() => {
+      runInAction(() => {
+        job.status = 'COMPLETED';
+        job.endTime = new Date(0);
+      });
+    });
+    expect(container.querySelector('.tdjobduration')).toHaveTextContent('-');
+
+    act(() => {
+      runInAction(() => {
+        job.endTime = new Date(NaN);
+      });
+    });
+    expect(container.querySelector('.tdjobduration')).toHaveTextContent('-');
+  });
+
+  it('never shows a negative duration when the end time precedes the start', () => {
+    const { container, job } = renderTable(new Date(2025, 0, 1, 15, 36, 8));
+    act(() => {
+      runInAction(() => {
+        job.status = 'COMPLETED';
+        job.endTime = new Date(2025, 0, 1, 15, 36, 3);
+      });
+    });
+    expect(container.querySelector('.tdjobduration')).toHaveTextContent('mock-time:0');
+  });
+
+  it('applies the lowercase status class so the badge styles match', () => {
+    const { container, job } = renderTable();
+    const badge = () => container.querySelector('.tditemjobstatus') as HTMLElement;
+    expect(badge()).toHaveClass('running');
+    expect(badge()).not.toHaveClass('RUNNING');
+
+    act(() => {
+      runInAction(() => {
+        job.status = 'FAILED';
+        job.endTime = new Date(2025, 0, 1, 15, 36, 8);
+      });
+    });
+    expect(badge()).toHaveClass('failed');
+    expect(badge()).toHaveTextContent('Failed');
   });
 });
 
