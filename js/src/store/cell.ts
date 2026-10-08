@@ -25,6 +25,8 @@ export class Cell {
   isCollapsed = false;
   isHeaderCollapsed = true;
   isRemoved = false;
+  /** True once the kernel reports that the IPython cell finished executing. */
+  cellFinished = false;
   uniqueJobIds: Array<string> = [];
   taskChartStore: TaskChartStore;
   constructor(
@@ -40,8 +42,13 @@ export class Cell {
     this.isCollapsed = false;
     this.isHeaderCollapsed = true;
     this.isRemoved = false;
+    this.cellFinished = false;
     this.uniqueJobIds = [];
     this.taskChartStore.reset();
+  }
+
+  setCellFinished(finished: boolean) {
+    this.cellFinished = finished;
   }
 
   toggleCollapseCellDisplay() {

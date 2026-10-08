@@ -91,6 +91,14 @@ export default {
     if (!notebookStore.cells[cellId]) {
       notebookStore.cells[cellId] = new Cell(cellId, notebookStore);
     }
+    const cell = notebookStore.cells[cellId];
+
+    const syncCellFinished = () => {
+      runInAction(() => {
+        cell.setCellFinished(Boolean(model.get('cell_finished')));
+      });
+    };
+    syncCellFinished();
 
     const sequencer = new CellMessageSequencer({
       onProcessEvent: (eventData: any) => {
@@ -128,12 +136,14 @@ export default {
 
     model.on('msg:custom', handleCustomMessage);
     model.on('change:spark_ui_url', handleSparkUiUrlChange);
+    model.on('change:cell_finished', syncCellFinished);
 
     return () => {
       sequencer.reset();
       model.send({ type: 'widget_unmount' });
       model.off('msg:custom', handleCustomMessage);
       model.off('change:spark_ui_url', handleSparkUiUrlChange);
+      model.off('change:cell_finished', syncCellFinished);
     };
   },
 

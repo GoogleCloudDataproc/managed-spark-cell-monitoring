@@ -34,6 +34,9 @@ class ManagedSparkCellWidget(anywidget.AnyWidget):
   run_id = traitlets.Unicode("").tag(sync=True)
   session_id = traitlets.Unicode("").tag(sync=True)
   spark_ui_url = traitlets.Unicode("").tag(sync=True)
+  # Set by the kernel extension when the IPython cell finishes executing.
+  # The frontend uses it to decide when to show the final job summary.
+  cell_finished = traitlets.Bool(False).tag(sync=True)
 
   def __init__(
       self,

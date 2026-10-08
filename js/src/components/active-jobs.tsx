@@ -51,6 +51,8 @@ const compareOldestFirst = (a: SparkJob, b: SparkJob) => {
 
 const jobNames = (jobs: SparkJob[]) => jobs.map((job) => job.name).join('\n');
 
+const pluralizeJobs = (count: number) => `${count} ${count === 1 ? 'job' : 'jobs'}`;
+
 /**
  * Returns the subset of `runningJobs` that has been running (as observed by
  * this component) for at least `delayMs`.
@@ -180,39 +182,55 @@ const RunningJobsSummary = observer(
 );
 
 /**
- * Shown when nothing is running: the failed job's name and task progress if
- * exactly one job failed, otherwise "N failed".
+ * Final summary once the cell finished and at least one job failed: the
+ * failed job's name if exactly one job failed, otherwise "N failed", plus
+ * the number of jobs that completed when there is room for it.
  */
-const FailedJobsSummary = observer((props: { failed: SparkJob[]; width: number }) => {
-  const { failed } = props;
-  if (failed.length === 1) {
-    const job = failed[0];
-    return (
-      <span className="active-job active-job--failed">
-        <Icon className="active-job-failed-icon" path={ERROR_ICON_PATH} size={18} />
-        <span className="active-job-name" title={job.name}>
-          {job.name}
+const FailedJobsSummary = observer(
+  (props: { failed: SparkJob[]; completedJobs: number; width: number }) => {
+    const { failed, completedJobs } = props;
+    const showCompleted = completedJobs > 0 && props.width >= FAILED_DETAIL_MIN_WIDTH_PX;
+    if (failed.length === 1) {
+      const job = failed[0];
+      return (
+        <span className="active-job active-job--failed">
+          <Icon className="active-job-failed-icon" path={ERROR_ICON_PATH} size={18} />
+          <span className="active-job-name" title={job.name}>
+            {job.name}
+          </span>
+          <span className="active-job-count">
+            <span className="active-job-failed-text">Failed</span>
+            {showCompleted && ` · ${pluralizeJobs(completedJobs)} completed`}
+          </span>
         </span>
+      );
+    }
+    return (
+      <span className="active-job active-job--failed" title={jobNames(failed)}>
+        <Icon className="active-job-failed-icon" path={ERROR_ICON_PATH} size={18} />
         <span className="active-job-count">
-          <span className="active-job-failed-text">Failed</span>
-          {props.width >= FAILED_DETAIL_MIN_WIDTH_PX &&
-            ` · ${job.numCompletedTasks || 0}/${job.numTasks || 0} tasks`}
+          <span className="active-job-failed-text">{failed.length} failed</span>
+          {showCompleted && ` · ${completedJobs} completed`}
         </span>
       </span>
     );
-  }
-  return (
-    <span className="active-job active-job--failed" title={jobNames(failed)}>
-      <Icon className="active-job-failed-icon" path={ERROR_ICON_PATH} size={18} />
-      <span className="active-job-failed-text">{failed.length} failed</span>
-    </span>
-  );
-});
+  },
+);
+
+/** Final summary once the cell finished and every job completed. */
+const CompletedJobsSummary = (props: { completedJobs: number }) => (
+  <span className="active-job active-job--done">
+    <Icon className="active-jobs-done-icon" path={CHECK_CIRCLE_ICON_PATH} size={18} />
+    <span className="active-job-count">{pluralizeJobs(props.completedJobs)} completed</span>
+  </span>
+);
 
 /**
  * Live job strip shown in the header between the title and the view buttons.
- * While jobs run it shows one summary item for all of them; when nothing is
- * running it shows the cell's failed jobs, if any.
+ * While jobs run it shows one summary item for all of them. Once the cell has
+ * finished executing and nothing is running any more, it shows the final
+ * outcome: the failed jobs if any, otherwise the number of completed jobs.
+ * Between jobs of a still-running cell it stays empty.
  *
  * Clicking anywhere in the strip toggles the header collapse, preserving
  * the behavior of the full-width left header area it replaces.
@@ -225,10 +243,18 @@ export const ActiveJobs = observer((props: { runningJobs: SparkJob[] }) => {
   let content: React.ReactNode = null;
   if (runningJobs.length > 0) {
     content = <RunningJobsSummary running={runningJobs} allJobs={cell.jobs} width={stripWidth} />;
-  } else if (cell.numActiveJobs === 0) {
+  } else if (cell.cellFinished && cell.numActiveJobs === 0) {
     const failedJobs = cell.jobs.filter((job) => job.status === 'FAILED').sort(compareOldestFirst);
     if (failedJobs.length > 0) {
-      content = <FailedJobsSummary failed={failedJobs} width={stripWidth} />;
+      content = (
+        <FailedJobsSummary
+          failed={failedJobs}
+          completedJobs={cell.numCompletedJobs}
+          width={stripWidth}
+        />
+      );
+    } else if (cell.numCompletedJobs > 0) {
+      content = <CompletedJobsSummary completedJobs={cell.numCompletedJobs} />;
     }
   }
 

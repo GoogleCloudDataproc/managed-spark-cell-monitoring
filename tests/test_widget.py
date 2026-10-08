@@ -31,6 +31,7 @@ def test_widget_initialization():
   assert widget.run_id == "run-123"
   assert widget.session_id == "sess-456"
   assert widget.spark_ui_url == "https://console.cloud.google.com/dataproc"
+  assert widget.cell_finished is False
   assert widget.active_jobs_count == 0
   assert widget_module.ACTIVE_WIDGET is widget
   assert "managed-spark-cell-widget" in widget._dom_classes
@@ -103,3 +104,13 @@ def test_cleanup_preserves_history_until_unmount():
   # Unmount clears history
   widget._handle_frontend_message(widget, {"type": "widget_unmount"})
   assert len(widget.event_history) == 0
+
+
+def test_cell_finished_is_synced_to_frontend():
+  """Test that cell_finished is a synced trait so the frontend sees it."""
+  widget = ManagedSparkCellWidget(run_id="run-1", session_id="sess-1")
+  assert widget.traits()["cell_finished"].metadata.get("sync") is True
+
+  widget.send_state = mock.MagicMock()
+  widget.cell_finished = True
+  widget.send_state.assert_called_with(key="cell_finished")
