@@ -23,7 +23,8 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 dependencies = [
-    "anywidget>=0.9.0",
+    "ipywidgets>=8.0.0,<9.0.0",
+    "anywidget>=0.9.0,<0.10.0",
     "ipython>=7.0.0",
     "ipykernel>=5.0.0",
     "traitlets>=5.0.0",
