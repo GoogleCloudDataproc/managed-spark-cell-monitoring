@@ -16,134 +16,87 @@
  */
 
 import { observer } from 'mobx-react-lite';
-import React from 'react';
-import TimeAgo from 'react-timeago';
 
 import prettyMilliseconds from 'pretty-ms';
 import { useCellStore, useNotebookStore } from '../store';
 import { ErrorBoundary } from './error-boundary';
 import { ProgressBar } from './progress-bar';
 
-const StageItem = observer((props: { stageId: string }) => {
+const EMPTY_VALUE = '\u2014'; // em dash
+
+/**
+ * True when the date is a real timestamp. Rejects undefined, Invalid Date and
+ * the Unix epoch, which is what an absent `submissionTime`/`completionTime`
+ * decodes to.
+ */
+export function isValidTimestamp(date: Date | undefined): date is Date {
+  return !!date && date.getTime() > 0;
+}
+
+/**
+ * Formats a job start time as a local wall-clock time, e.g. "3:36:03 PM"
+ * (or "15:36:03" in 24-hour locales). The timestamp arrives from the driver
+ * as epoch milliseconds, so Intl renders it in the browser's time zone.
+ */
+export function formatStartTime(date: Date | undefined): string {
+  if (!isValidTimestamp(date)) {
+    return EMPTY_VALUE;
+  }
+  return date.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+/** Full date and time for the Start Time tooltip, e.g. "Oct 6, 2026, 3:36:03 PM". */
+export function formatStartTimestamp(date: Date | undefined): string {
+  if (!isValidTimestamp(date)) {
+    return '';
+  }
+  return date.toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  });
+}
+
+const JobItem = observer((props: { jobId: string }) => {
   const notebook = useNotebookStore();
-  const stage = notebook.stages[props.stageId];
-  if (!stage) {
+  const job = notebook?.jobs[props.jobId];
+  if (!job) {
     return null;
   }
+  // Both ends must be real timestamps; clamp so clock skew between the
+  // driver's submission and completion times can never show as negative.
+  const durationMs =
+    isValidTimestamp(job.endTime) && isValidTimestamp(job.startTime)
+      ? Math.max(0, job.endTime.getTime() - job.startTime.getTime())
+      : NaN;
   return (
-    <tr className="stagerow">
-      <td className="tdstageid">{stage.stageId}</td>
-      <td className="tdstagename">
-        {stage.name
-          ? String(stage.name).charAt(0).toUpperCase() + String(stage.name).slice(1).toLowerCase()
-          : 'Unnamed'}
+    <tr className="jobrow">
+      <td className="tdjobname">{job.name ? job.name : 'Unnamed'}</td>
+      <td className="tdjobstarttime" title={formatStartTimestamp(job.startTime)}>
+        {formatStartTime(job.startTime)}
       </td>
-      <td className="tdstagestatus">
-        <span className={stage.status}>
-          {stage.status
-            ? String(stage.status).charAt(0).toUpperCase() +
-              String(stage.status).slice(1).toLowerCase()
+      <td className="tdjobstatus">
+        <span className={'tditemjobstatus ' + String(job.status).toLowerCase()}>
+          {job.status
+            ? String(job.status).charAt(0).toUpperCase() +
+              String(job.status).slice(1).toLowerCase()
             : 'Unknown'}
         </span>
       </td>
       <td className="tdtasks">
         <ProgressBar
-          total={stage.numTasks}
-          running={stage.numActiveTasks}
-          completed={stage.numCompletedTasks}
+          total={job.numTasks}
+          running={job.numActiveTasks}
+          completed={job.numCompletedTasks}
         />
       </td>
-      <td className="tdstagestarttime">
-        <TimeAgo date={stage.submissionTime} minPeriod={10} />
-      </td>
-      <td className="tdstageduration">
-        {stage.completionTime &&
-        !isNaN(stage.completionTime.getTime() - stage.submissionTime.getTime())
-          ? prettyMilliseconds(stage.completionTime.getTime() - stage.submissionTime.getTime())
-          : '-'}
+      <td className="tdjobduration">
+        {Number.isNaN(durationMs) ? '-' : prettyMilliseconds(durationMs)}
       </td>
     </tr>
-  );
-});
-
-const StageTable = observer((props: { jobId: string }) => {
-  const notebook = useNotebookStore();
-  const stageIds = notebook.jobs[props.jobId].uniqueStageIds;
-  const rows = stageIds.map((stageId) => {
-    return <StageItem stageId={stageId} key={stageId} />;
-  });
-  return (
-    <table className="stagetable">
-      <thead>
-        <tr>
-          <th className="thstageid">Stage ID</th>
-          <th className="thstagename">Stage Name</th>
-          <th className="thstagestatus">Status</th>
-          <th className="thstagetasks">Tasks</th>
-          <th className="thstagestart">Submission Time</th>
-          <th className="thstageduration">Duration</th>
-        </tr>
-      </thead>
-      <tbody>{rows}</tbody>
-    </table>
-  );
-});
-
-const JobItem = observer((props: { jobId: string }) => {
-  const notebook = useNotebookStore();
-  const job = notebook?.jobs[props.jobId];
-  const [stagesCollapsed, setStageTableCollapsed] = React.useState(true);
-  const onClickCollapseStageTable = () => {
-    setStageTableCollapsed((value) => !value);
-  };
-  if (!job) {
-    return null;
-  }
-  return (
-    <>
-      <tr className="jobrow">
-        <td className="tdstagebutton" onClick={onClickCollapseStageTable}>
-          <span
-            className={stagesCollapsed ? 'tdstageicon' : 'tdstageicon tdstageiconcollapsed'}
-          ></span>
-        </td>
-        <td className="tdjobid">{job.jobId}</td>
-        <td className="tdjobname">{job.name ? job.name : 'Unnamed'}</td>
-        <td className="tdjobstatus">
-          <span className={'tditemjobstatus ' + job.status}>
-            {job.status
-              ? String(job.status).charAt(0).toUpperCase() +
-                String(job.status).slice(1).toLowerCase()
-              : 'Unknown'}
-          </span>
-        </td>
-        <td className="tdjobstages">
-          {job.numCompletedStages}/{job.numStages}
-        </td>
-        <td className="tdtasks">
-          <ProgressBar
-            total={job.numTasks}
-            running={job.numActiveTasks}
-            completed={job.numCompletedTasks}
-          />
-        </td>
-        <td className="tdjobstarttime">
-          <TimeAgo date={job.startTime} minPeriod={10} />
-        </td>
-        <td className="tdjobduration">
-          {job.endTime && !isNaN(job.endTime.getTime() - job.startTime.getTime())
-            ? prettyMilliseconds(job.endTime.getTime() - job.startTime.getTime())
-            : '-'}
-        </td>
-      </tr>
-      {!stagesCollapsed && (
-        <tr className="jobstagedatarow">
-          <td colSpan={8} className="stagedata">
-            <StageTable jobId={props.jobId} />
-          </td>
-        </tr>
-      )}
-    </>
   );
 });
 
@@ -156,13 +109,10 @@ export const JobTable = observer(() => {
         <table className="jobtable">
           <thead>
             <tr>
-              <th className="thbutton"></th>
-              <th className="thjobid">Job ID</th>
               <th className="thjobname">Job Name</th>
+              <th className="thjobstart">Start Time</th>
               <th className="thjobstatus">Status</th>
-              <th className="thjobstages">Stages</th>
               <th className="thjobtasks">Tasks</th>
-              <th className="thjobstart">Submission Time</th>
               <th className="thjobtime">Duration</th>
             </tr>
           </thead>

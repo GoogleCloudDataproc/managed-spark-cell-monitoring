@@ -23,11 +23,6 @@ import { Cell } from '../store/cell';
 import { NotebookStoreContext, CellStoreContext } from '../store';
 import { store } from '../store/index';
 
-jest.mock('react-timeago', () => ({
-  __esModule: true,
-  default: () => <span data-testid="timeago-mock">TimeAgo Mock</span>
-}));
-
 jest.mock('pretty-ms', () => ({
   __esModule: true,
   default: () => "mock-time"

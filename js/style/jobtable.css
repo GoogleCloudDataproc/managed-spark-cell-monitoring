@@ -29,10 +29,6 @@
   background-size: contain;
   margin-left: 8px;
 }
-.pm .tdstagebutton {
-  cursor: pointer;
-  background-color: transparent;
-}
 .pm .tdstageiconcollapsed {
   transform: rotate(90deg);
 }
@@ -61,10 +57,6 @@
   font-size: 12px;
   font-weight: 400;
 }
-.pm td.tdstagebutton {
-  background-color: inherit;
-}
-
 .pm .jobrow > td {
   background-color: var(--cellmonitor-bg-primary, #ffffff) !important;
   text-align: center;
@@ -72,21 +64,6 @@
   height: 30px;
   line-height: 30px;
   padding: 8px 6px;
-}
-.pm .jobstagedatarow > td {
-  background-color: var(--cellmonitor-bg-secondary, #f0f4f9);
-  padding: 8px;
-}
-.pm .stagerow > td {
-  background-color: var(--cellmonitor-bg-primary, #ffffff) !important;
-  text-align: center;
-  vertical-align: middle;
-  height: 28px;
-  line-height: 28px;
-  padding: 6px 4px;
-  border-bottom: 2px solid #eeeeee;
-  font-size: 12px;
-  font-family: 'Roboto', sans-serif;
 }
 .pm table {
   border-radius: 0;
@@ -107,53 +84,20 @@
   line-height: 25px;
 }
 
-.pm tr .tdstagebutton:hover ~ td,
-.pm tr .tdstagebutton:hover {
-  background-color: var(--cellmonitor-bg-secondary, #f0f4f9);
-}
-
-.pm th.thbutton {
-  width: 4%;
-}
-.pm th.thjobid {
-  width: 6%;
-}
 .pm th.thjobname {
-  width: 10%;
+  width: 24%;
   white-space: nowrap;
-}
-.pm th.thjobstatus {
-  width: 12%;
-}
-.pm th.thjobtages {
-  width: 10%;
-}
-.pm th.thjobtasks {
-  width: 28%;
 }
 .pm th.thjobstart {
   width: 20%;
 }
+.pm th.thjobstatus {
+  width: 12%;
+}
+.pm th.thjobtasks {
+  width: 32%;
+}
 .pm th.thjobtime {
-  width: 10%;
-}
-.pm th.thstageid {
-  width: 8%;
-}
-.pm th.thstagename {
-  width: 10%;
-  white-space: nowrap;
-}
-.pm th.thstagestatus {
-  width: 17%;
-}
-.pm th.thstagetasks {
-  width: 33%;
-}
-.pm th.thstagestart {
-  width: 20%;
-}
-.pm th.thstageduration {
   width: 12%;
 }
 
@@ -172,36 +116,16 @@ progress {
 .pm .completed {
   background-color: #6dd58c;
 }
-.pm .pending {
-  background-color: #9c27b0;
-}
-.pm .skipped {
-  background-color: #616161;
-}
 
 .pm .completed,
 .pm .failed,
-.pm .running,
-.pm .pending,
-.pm .skipped {
+.pm .running {
   font-size: 75%;
   color: white;
   border-radius: 2px;
 }
-.pm .tdstagestatus > span,
 .pm .tdjobstatus > span {
   padding: 4px 8px;
-}
-.pm .stagetable tr th {
-  background-color: var(--cellmonitor-bg-tertiary, #dde3ea);
-  border-top: 1px solid #eeeeee;
-  border-bottom: 2px solid #eeeeee;
-  font-weight: 500;
-  font-size: 13px;
-  font-family: 'Roboto', sans-serif;
-  height: 26px;
-  line-height: 26px;
-  padding: 6px 8px;
 }
 .pm .cssprogress-container {
   display: flex;
@@ -271,27 +195,11 @@ progress {
 }
 
 [data-jp-theme-light='false'] .pm .jobrow > td,
-[data-jp-theme-light='false'] .pm .stagerow > td,
 .vscode-dark .pm .jobrow > td,
-.vscode-dark .pm .stagerow > td,
-.vscode-high-contrast .pm .jobrow > td,
-.vscode-high-contrast .pm .stagerow > td {
+.vscode-high-contrast .pm .jobrow > td {
   background-color: var(--cellmonitor-bg-primary, #000000) !important;
   border-top: 1px solid #444746;
   border-bottom: 1px solid #444746;
-}
-[data-jp-theme-light='false'] .pm .jobstagedatarow > td,
-.vscode-dark .pm .jobstagedatarow > td,
-.vscode-high-contrast .pm .jobstagedatarow > td {
-  background-color: var(--cellmonitor-bg-secondary, #444746);
-}
-[data-jp-theme-light='false'] .pm .stagetable tr th,
-.vscode-dark .pm .stagetable tr th,
-.vscode-high-contrast .pm .stagetable tr th {
-  background-color: var(--cellmonitor-bg-tertiary, #303030);
-  border-top: 1px solid #444746;
-  border-bottom: 1px solid #444746;
-  color: #e1e3e1;
 }
 [data-jp-theme-light='false'] .pm .tdstageicon,
 .vscode-dark .pm .tdstageicon,
