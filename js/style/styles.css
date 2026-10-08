@@ -69,7 +69,8 @@
   height: 30px;
 }
 .pm .titleleft {
-  flex-grow: 1;
+  /* The active-job strip (header.css) takes the remaining width. */
+  flex-grow: 0;
   height: 30px;
   cursor: pointer;
 }
@@ -97,67 +98,6 @@
   background-color: #c45917;
 }
 
-/* Badges */
-.pm .badges {
-  text-align: center;
-  margin-left: 8px;
-}
-.pm .badgesspan {
-  margin-left: 8px;
-}
-.pm .jobstag {
-  margin-left: 16px;
-}
-
-.badgerunning {
-  color: #1976d2;
-  background-color: #edeff3;
-  border: 1px solid #1976d2;
-  font-size: 100%;
-  padding: 0px 8px;
-  border-radius: 100px;
-  white-space: nowrap;
-  font-weight: 500;
-  margin: 0 2px;
-}
-.badgecompleted {
-  color: #188038;
-  background-color: #edeff3;
-  border: 1px solid #188038;
-  font-size: 100%;
-  padding: 0px 8px;
-  border-radius: 100px;
-  white-space: nowrap;
-  font-weight: 500;
-  margin: 0 2px;
-}
-.badgefailed {
-  color: #db3636;
-  background-color: #edeff3;
-  border: 1px solid #db3636;
-  font-size: 100%;
-  padding: 0px 8px;
-  border-radius: 100px;
-  white-space: nowrap;
-  font-weight: 500;
-  margin: 0 2px;
-}
-.badgeexecutor,
-.badgeexecutorcores {
-  font-size: 100%;
-  padding: 0px 8px;
-  justify-content: center;
-  align-items: flex-start;
-  gap: 5px;
-  color: #202124;
-  border-radius: 100px;
-  border: 1px solid #c4c7c5;
-  background-color: #edeff3;
-  margin-right: 8px;
-}
-.badgeexecutorcores {
-  margin-left: 4px;
-}
 .uibuttondisabled {
   color: #b2b2b2;
 }
