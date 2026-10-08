@@ -51,8 +51,6 @@ export const CellMonitorHeader = observer((props: CellMonitorHeaderProps) => {
     'jobtabletabbuttonicon tabbutton ' + isButtonActive('jobs');
   const tasksButtonClassNames =
     'taskviewtabbuttonicon tabbutton ' + isButtonActive('taskchart');
-  const timelineButtonClassNames =
-    'timelinetabbuttonicon tabbutton ' + isButtonActive('timeline');
 
   return (
     <div className="title">
@@ -93,17 +91,6 @@ export const CellMonitorHeader = observer((props: CellMonitorHeaderProps) => {
                 cell.toggleCollapseCellDisplay();
               } else {
                 cell.setView('taskchart');
-              }
-            }}
-          />
-          <span
-            className={timelineButtonClassNames}
-            title="Event Timeline"
-            onClick={() => {
-              if (cell.view === 'timeline' && !cell.isCollapsed) {
-                cell.toggleCollapseCellDisplay();
-              } else {
-                cell.setView('timeline');
               }
             }}
           />

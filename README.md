@@ -10,7 +10,7 @@ Leveraging [AnyWidget](https://anywidget.dev/), it enables platform-agnostic, ze
 
 - 📊 **Real-time Progress Tracking:** Visual progress bars for active Apache Spark jobs, stages, and tasks directly in notebook cells.
 - ⚡ **AnyWidget Architecture:** Precompiled ESM widgets rendered natively without requiring custom JupyterLab extension binaries.
-- ⏱️ **Task Timeline & Metrics:** Detailed timeline graphs for task execution, GC time, serialization overhead, and active executor core utilization.
+- ⏱️ **Task Chart:** Live chart of running and scheduled tasks against available executor cores.
 
 ---
 
@@ -18,7 +18,7 @@ Leveraging [AnyWidget](https://anywidget.dev/), it enables platform-agnostic, ze
 
 1. **Scala Listener (`scalalistener`):** Plugs into the Apache Spark driver's `SparkListener` bus to capture fine-grained task and stage metrics with lock-free queueing and delta-change metric caching.
 2. **Python Kernel Extension (`managed_spark_cell_monitoring.kernelextension`):** Intercepts cell execution hooks (`pre_run_cell`, `post_run_cell`) and routes telemetry events to active widget instances via Jupyter Comms.
-3. **AnyWidget React Frontend (`managed_spark_cell_monitoring/static/widget.js`):** Modular React 18 / MobX frontend compiled via `esbuild`, providing isolated UI components for job tables, stage bars, and task timelines.
+3. **AnyWidget React Frontend (`managed_spark_cell_monitoring/static/widget.js`):** Modular React 18 / MobX frontend compiled via `esbuild`, providing isolated UI components for the job table and task chart.
 
 ---
 

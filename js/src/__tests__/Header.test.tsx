@@ -55,10 +55,6 @@ describe('Header Component', () => {
     fireEvent.click(taskChartTab);
     expect(cellStore.view).toBe('taskchart');
 
-    const timelineTab = screen.getByTitle(/Event Timeline/i);
-    fireEvent.click(timelineTab);
-    expect(cellStore.view).toBe('timeline');
-    
     const jobsTab = screen.getByTitle(/Jobs/i);
     fireEvent.click(jobsTab);
     expect(cellStore.view).toBe('jobs');

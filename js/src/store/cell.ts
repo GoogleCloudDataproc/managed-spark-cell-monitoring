@@ -21,7 +21,7 @@ import { TaskChartStore } from './task-chart-store';
 import type { NotebookStore } from './notebook';
 
 export class Cell {
-  view: 'jobs' | 'taskchart' | 'timeline' = 'jobs';
+  view: 'jobs' | 'taskchart' = 'jobs';
   isCollapsed = false;
   isHeaderCollapsed = true;
   isRemoved = false;
@@ -63,7 +63,7 @@ export class Cell {
     this.isRemoved = !this.isRemoved;
   }
 
-  setView(view: 'jobs' | 'taskchart' | 'timeline') {
+  setView(view: 'jobs' | 'taskchart') {
     this.view = view;
     this.isCollapsed = false;
     this.isRemoved = false;

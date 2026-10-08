@@ -478,7 +478,6 @@ describe('Header layout', () => {
       '2 executors · 8 cores',
       'Jobs',
       'Tasks',
-      'Event Timeline',
       'View in Google Cloud',
       'Close Display',
     ]);
