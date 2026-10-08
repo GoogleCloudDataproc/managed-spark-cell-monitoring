@@ -31,6 +31,12 @@ const Plot = createPlotlyComponent(Plotly);
  * - "Executor Cores" (blue): available executor slots over time.
  * - Vertical lines and markers for job boundaries.
  * - Custom legend and theme-aware colors.
+ *
+ * Executor data is only available when the Scala listener is attached to the
+ * driver (remote kernels). Spark Connect sessions receive job and stage
+ * telemetry but no executor or core counts, so for them the chart falls back
+ * to a single "Running Tasks" series showing the raw active task count; the
+ * "Scheduled Tasks" and "Executor Cores" series are omitted.
  */
 
 // --- Theme and Layout Helpers ---
@@ -122,18 +128,36 @@ const getPlotDefaultLayout = (): Partial<Plotly.Layout> => {
 };
 
 // --- Trace Creators ---
+
+/**
+ * Returns true when at least one executor-core sample is known for this cell.
+ * Spark Connect sessions never report executor cores, so this stays false and
+ * the chart renders the running-tasks-only variant.
+ */
+export function hasExecutorData(executorDataY: number[]): boolean {
+  return executorDataY.some((numCores) => numCores > 0);
+}
+
+/**
+ * Builds the running-tasks series. When executor data is available the
+ * series is capped at the executor cores; the excess is drawn by the
+ * scheduled-tasks series. Without executor data the raw active task count is
+ * plotted.
+ */
 function createRunningTasksTrace(
   taskDataX: number[],
   taskDataY: number[],
-  executorDataY: number[],
+  executorDataY?: number[],
 ): Plotly.Data {
   const color = getCssVar('--cellmonitor-running-tasks');
   const fill = getCssVar('--cellmonitor-running-tasks-fill');
   return {
     x: taskDataX,
-    y: taskDataY.map((numTasks, index) =>
-      Math.min(numTasks, executorDataY[index] || 0),
-    ),
+    y: executorDataY
+      ? taskDataY.map((numTasks, index) =>
+          Math.min(numTasks, executorDataY[index] || 0),
+        )
+      : taskDataY,
     type: 'scatter',
     mode: 'lines',
     line: {color, width: 2, shape: 'hv'},
@@ -285,6 +309,72 @@ function createLegendTrace(
   };
 }
 
+/** The series the chart is built from (a structural subset of TaskChartStore). */
+export interface TaskChartSeries {
+  taskDataX: number[];
+  taskDataY: number[];
+  executorDataX: number[];
+  executorDataY: number[];
+  jobDataX: number[];
+  jobDataY: number[];
+  jobDataText: string[];
+}
+
+/**
+ * Assembles the Plotly traces for the chart. With executor data (remote
+ * kernels) this is the full running / scheduled / executor-cores chart;
+ * without it (Spark Connect) only running tasks and job markers are drawn.
+ */
+export function createChartData(series: TaskChartSeries): Plotly.Data[] {
+  const jobTrace = createJobTrace(
+    series.jobDataX,
+    series.jobDataY,
+    series.jobDataText,
+  );
+  const runningLegend = createLegendTrace(
+    'Running Tasks',
+    '--cellmonitor-running-tasks',
+    'running',
+  );
+
+  if (!hasExecutorData(series.executorDataY)) {
+    return [
+      createRunningTasksTrace(series.taskDataX, series.taskDataY),
+      jobTrace,
+      runningLegend,
+    ];
+  }
+
+  const {scheduledX, scheduledY, baseX, baseY} = createScheduledTasksData(
+    series.taskDataX,
+    series.taskDataY,
+    series.executorDataY,
+  );
+
+  return [
+    createRunningTasksTrace(
+      series.taskDataX,
+      series.taskDataY,
+      series.executorDataY,
+    ),
+    createScheduledBaseTrace(baseX, baseY),
+    createScheduledTasksTrace(scheduledX, scheduledY),
+    createExecutorTrace(series.executorDataX, series.executorDataY),
+    jobTrace,
+    runningLegend,
+    createLegendTrace(
+      'Scheduled Tasks',
+      '--cellmonitor-scheduled-tasks',
+      'scheduled',
+    ),
+    createLegendTrace(
+      'Executor Cores',
+      '--cellmonitor-executor-cores',
+      'executors',
+    ),
+  ];
+}
+
 // --- Main Component ---
 const plotOptions = {displaylogo: false, scrollZoom: true};
 
@@ -296,47 +386,7 @@ const TaskChart = observer(() => {
   const [themeRevision, setThemeRevision] = React.useState(1);
 
   // --- Data Preparation ---
-  const data = React.useMemo(() => {
-    const {scheduledX, scheduledY, baseX, baseY} = createScheduledTasksData(
-      taskChartStore.taskDataX,
-      taskChartStore.taskDataY,
-      taskChartStore.executorDataY,
-    );
-
-    return [
-      createRunningTasksTrace(
-        taskChartStore.taskDataX,
-        taskChartStore.taskDataY,
-        taskChartStore.executorDataY,
-      ),
-      createScheduledBaseTrace(baseX, baseY),
-      createScheduledTasksTrace(scheduledX, scheduledY),
-      createExecutorTrace(
-        taskChartStore.executorDataX,
-        taskChartStore.executorDataY,
-      ),
-      createJobTrace(
-        taskChartStore.jobDataX,
-        taskChartStore.jobDataY,
-        taskChartStore.jobDataText,
-      ),
-      createLegendTrace(
-        'Running Tasks',
-        '--cellmonitor-running-tasks',
-        'running',
-      ),
-      createLegendTrace(
-        'Scheduled Tasks',
-        '--cellmonitor-scheduled-tasks',
-        'scheduled',
-      ),
-      createLegendTrace(
-        'Executor Cores',
-        '--cellmonitor-executor-cores',
-        'executors',
-      ),
-    ];
-  }, [
+  const data = React.useMemo(() => createChartData(taskChartStore), [
     taskChartStore.taskDataX,
     taskChartStore.taskDataY,
     taskChartStore.executorDataX,
