@@ -17,8 +17,11 @@
 import json
 import logging
 import os
+import re
 import socket
 import threading
+import urllib.parse
+import urllib.request
 import uuid
 
 import IPython.display
@@ -42,6 +45,14 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+_METADATA_IP_BASE = 'http://169.254.169.254/computeMetadata/v1'
+_METADATA_HEADERS = {'Metadata-Flavor': 'Google'}
+_NO_PROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+_DATAPROC_PROPERTIES_PATH = '/etc/google-dataproc/dataproc.properties'
+_SPARK_DEFAULTS_PATH = '/etc/spark/conf/spark-defaults.conf'
+_SAFE_APP_ID_RE = re.compile(r'^[A-Za-z0-9_.-]+$')
+_YARN_APP_ID_RE = re.compile(r'^application_\d+_\d+$')
+
 
 class CellMonitorExtension:
   """Manages the TCP socket, routing state, and IPython cell hooks."""
@@ -51,6 +62,7 @@ class CellMonitorExtension:
     self.port = None
     self.server = None
     self.socket_thread = None
+    self.env_thread = None
 
     # State tracking
     self.run_id = None
@@ -58,6 +70,18 @@ class CellMonitorExtension:
     self.active_widgets = {}
     self.job_to_run_id = {}
     self.sequence_counter = 0
+
+    # Spark UI link state
+    self._env_lock = threading.Lock()
+    self.env_type = None  # 's8s' | 'dpgce' | 'unknown'
+    self.project_id = ''
+    self.region = ''
+    self.dataproc_session_id = ''
+    self.proxy_hostname = ''
+    self.app_context_enabled = None
+    self._live_conf_checked = False
+    self.app_id = ''
+    self.spark_ui_url = ''
 
   def start_server(self):
     """Starts TCP Server for listener metadata streaming."""
@@ -69,6 +93,173 @@ class CellMonitorExtension:
 
     self.socket_thread = SocketThread(self.server, self)
     self.socket_thread.start()
+    self._start_env_thread()
+
+  def _start_env_thread(self):
+    """Starts background daemon thread for Dataproc environment detection."""
+    self.env_thread = threading.Thread(
+        target=self._resolve_environment_bg, daemon=True
+    )
+    self.env_thread.start()
+
+  @staticmethod
+  def _fetch_metadata(path, timeout=0.5):
+    """Fetches a GCE metadata value via link-local IP, bypassing any proxy."""
+    req = urllib.request.Request(
+        f'{_METADATA_IP_BASE}/{path}', headers=_METADATA_HEADERS
+    )
+    try:
+      with _NO_PROXY_OPENER.open(req, timeout=timeout) as resp:
+        if resp.status == 200:
+          return resp.read().decode('utf-8').strip()
+    except Exception:  # pylint: disable=broad-exception-caught
+      pass
+    return ''
+
+  @staticmethod
+  def _read_dataproc_proxy_hostname(path=None):
+    """Reads and normalizes dataproc.proxy.public.hostname if CG is enabled."""
+    path = path or _DATAPROC_PROPERTIES_PATH
+    if not os.path.exists(path):
+      return ''
+    try:
+      with open(path, encoding='utf-8') as f:
+        for raw_line in f:
+          line = raw_line.strip()
+          if not line or line.startswith('#'):
+            continue
+          key, sep, val = line.partition('=')
+          if sep == '=' and key.strip() == 'dataproc.proxy.public.hostname':
+            host = val.strip().replace(r'\:', ':').rstrip('/')
+            return host if host.startswith('https://') else ''
+    except Exception:  # pylint: disable=broad-exception-caught
+      pass
+    return ''
+
+  @staticmethod
+  def _read_spark_defaults_app_context(path=None):
+    """Checks spark.dataproc.appContext.enabled in spark-defaults.conf."""
+    path = path or _SPARK_DEFAULTS_PATH
+    if not os.path.exists(path):
+      return True
+    try:
+      with open(path, encoding='utf-8') as f:
+        for raw_line in f:
+          line = raw_line.strip()
+          if not line or line.startswith('#'):
+            continue
+          # Spark accepts "key value", "key=value" and "key = value".
+          if '=' in line:
+            key, _, value = line.partition('=')
+          else:
+            key, value = (line.split(None, 1) + [''])[:2]
+          if key.strip() == 'spark.dataproc.appContext.enabled':
+            return value.strip().lower() == 'true'
+    except Exception:  # pylint: disable=broad-exception-caught
+      pass
+    return True
+
+  @staticmethod
+  def _is_valid_app_id(candidate):
+    """Returns True if candidate is a real cluster/serverless Spark appId."""
+    return (
+        isinstance(candidate, str)
+        and bool(candidate)
+        and candidate != 'null'
+        and not candidate.startswith('local-')
+        and bool(_SAFE_APP_ID_RE.match(candidate))
+    )
+
+  def _resolve_environment_bg(self):
+    """Detects Serverless vs. DPGCE in the background without stalling startup."""
+    # Check Dataproc Serverless first (jupyter.sh also reads proxy hostname on s8s)
+    session_id = self._fetch_metadata('instance/attributes/dataproc-session-id')
+    if session_id:
+      project_id = self._fetch_metadata('project/project-id')
+      region = self._fetch_metadata('instance/attributes/dataproc-region')
+      if not region:
+        zone = self._fetch_metadata('instance/zone')
+        if zone:
+          zone_name = zone.rsplit('/', 1)[-1]
+          region = '-'.join(zone_name.split('-')[:-1])
+      default_app_ctx = self._read_spark_defaults_app_context()
+      with self._env_lock:
+        self.env_type = 's8s'
+        self.dataproc_session_id = session_id
+        self.project_id = project_id
+        self.region = region
+        if self.app_context_enabled is None:
+          self.app_context_enabled = default_app_ctx
+      self._refresh_spark_ui_url()
+      return
+
+    proxy_host = self._read_dataproc_proxy_hostname()
+    with self._env_lock:
+      if proxy_host:
+        self.env_type = 'dpgce'
+        self.proxy_hostname = proxy_host
+      else:
+        self.env_type = 'unknown'
+    self._refresh_spark_ui_url()
+
+  def _update_app_id(self, candidate_app_id):
+    """Validates and records appId, then updates spark_ui_url if needed."""
+    if not self._is_valid_app_id(candidate_app_id):
+      return
+    with self._env_lock:
+      if self.app_id == candidate_app_id:
+        return
+      self.app_id = candidate_app_id
+    self._refresh_spark_ui_url()
+
+  def _refresh_spark_ui_url(self):
+    """Computes the Spark UI URL and pushes updates to active widgets."""
+    with self._env_lock:
+      new_url = ''
+      app_ctx = (
+          True if self.app_context_enabled is None else self.app_context_enabled
+      )
+      if (
+          self.env_type == 's8s'
+          and app_ctx
+          and self.project_id
+          and self.region
+          and self.dataproc_session_id
+      ):
+        enc_region = urllib.parse.quote(self.region, safe='')
+        enc_session = urllib.parse.quote(self.dataproc_session_id, safe='')
+        enc_project = urllib.parse.quote(self.project_id, safe='')
+        if self.app_id:
+          enc_app = urllib.parse.quote(self.app_id, safe='')
+          new_url = (
+              'https://console.cloud.google.com/dataproc/interactive/'
+              f'{enc_region}/{enc_session}/sparkApplications/applications/'
+              f'{enc_app}?project={enc_project}'
+          )
+        else:
+          new_url = (
+              'https://console.cloud.google.com/dataproc/interactive/'
+              f'{enc_region}/{enc_session}/sparkApplications/applications'
+              f'?project={enc_project}'
+          )
+      elif (
+          self.env_type == 'dpgce'
+          and self.proxy_hostname
+          and self.app_id
+          and _YARN_APP_ID_RE.match(self.app_id)
+      ):
+        enc_app = urllib.parse.quote(self.app_id, safe='')
+        new_url = f'{self.proxy_hostname}/gateway/default/yarn/proxy/{enc_app}/'
+
+      if new_url == self.spark_ui_url:
+        return
+      self.spark_ui_url = new_url
+      # Snapshot under the lock so a widget registered concurrently by
+      # pre_run_cell_hook either appears here or reads the new URL itself.
+      widgets = list(self.active_widgets.values())
+
+    for widget in widgets:
+      widget.spark_ui_url = new_url
 
   def _resolve_widget(self, target_id):
     """Finds the correct widget instance for a given session/job."""
@@ -96,6 +287,7 @@ class CellMonitorExtension:
   def _handle_job_start(self, widget, spark_msg):
     # Map this new Spark job to the correct widget's run_id so future
     # stage/task events for this job can be routed to the same widget.
+    self._update_app_id(spark_msg.get('appId', ''))
     self.job_to_run_id[spark_msg['jobId']] = widget.run_id
     widget.active_jobs_count += 1
     widget.append_event(spark_msg, self.sequence_counter)
@@ -135,6 +327,8 @@ class CellMonitorExtension:
     try:
       spark_msg = msg
       self.sequence_counter += 1
+      if msgtype == 'sparkApplicationStart':
+        self._update_app_id(spark_msg.get('appId', ''))
       
       target_run_id = self._get_target_run_id(spark_msg, msgtype)
       widget = self._resolve_widget(target_run_id)
@@ -190,6 +384,24 @@ class CellMonitorExtension:
       session = SparkSession.getActiveSession() or SparkSession.getDefaultSession()
 
       if session and hasattr(session, "sparkContext"):
+        if not self._live_conf_checked:
+          try:
+            live_flag = session.conf.get(
+                'spark.dataproc.appContext.enabled', None
+            )
+            if live_flag is not None:
+              with self._env_lock:
+                self.app_context_enabled = (
+                    str(live_flag).strip().lower() == 'true'
+                )
+              self._refresh_spark_ui_url()
+            self._live_conf_checked = True
+          except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        if not self.app_id:
+          self._update_app_id(
+              getattr(session.sparkContext, 'applicationId', '')
+          )
         session.sparkContext.setJobGroup(
             self.run_id, 'IPython Cell Execution', interruptOnCancel=True
         )
@@ -200,7 +412,11 @@ class CellMonitorExtension:
         run_id=self.run_id, session_id=self.global_session_id
     )
     widget.cell_finished = False
-    self.active_widgets[self.run_id] = widget
+    # Seed the URL and register the widget atomically with respect to
+    # _refresh_spark_ui_url so no update can slip between the two steps.
+    with self._env_lock:
+      widget.spark_ui_url = self.spark_ui_url
+      self.active_widgets[self.run_id] = widget
     IPython.display.display(widget)
 
   def post_run_cell_hook(self, result):

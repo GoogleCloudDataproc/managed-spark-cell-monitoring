@@ -18,11 +18,21 @@
 import {observer} from 'mobx-react-lite';
 import {useCellStore, useNotebookStore} from '../store';
 import {ActiveJobs, useVisibleRunningJobs} from './active-jobs';
+import {ConsoleLink} from './console-link';
+
+type CellMonitorHeaderProps = {
+  /**
+   * Overrides the "View in Google Cloud" link URL. Defaults to the
+   * notebook's Spark UI URL; the link is hidden when neither is set.
+   */
+  viewUrl?: string;
+  viewLabel?: string;
+};
 
 const pluralize = (count: number, noun: string) =>
   `${count} ${count === 1 ? noun : `${noun}s`}`;
 
-export const CellMonitorHeader = observer(() => {
+export const CellMonitorHeader = observer((props: CellMonitorHeaderProps) => {
   const notebook = useNotebookStore();
   const cell = useCellStore();
   const runningJobs = useVisibleRunningJobs(cell);
@@ -96,6 +106,10 @@ export const CellMonitorHeader = observer(() => {
                 cell.setView('timeline');
               }
             }}
+          />
+          <ConsoleLink
+            url={props.viewUrl ?? notebook.viewUrl}
+            label={props.viewLabel}
           />
           <span
             className="closebuttonicon tabbutton"

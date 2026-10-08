@@ -81,6 +81,13 @@ export default {
     }
     const notebookStore = store.notebooks[notebookId];
 
+    const initialSparkUiUrl = model.get('spark_ui_url') as string | undefined;
+    if (initialSparkUiUrl) {
+      runInAction(() => {
+        notebookStore.setViewUrl(initialSparkUiUrl);
+      });
+    }
+
     if (!notebookStore.cells[cellId]) {
       notebookStore.cells[cellId] = new Cell(cellId, notebookStore);
     }
@@ -112,12 +119,21 @@ export default {
       }
     };
 
+    const handleSparkUiUrlChange = () => {
+      const updatedUrl = model.get('spark_ui_url') as string | undefined;
+      runInAction(() => {
+        notebookStore.setViewUrl(updatedUrl);
+      });
+    };
+
     model.on('msg:custom', handleCustomMessage);
+    model.on('change:spark_ui_url', handleSparkUiUrlChange);
 
     return () => {
       sequencer.reset();
       model.send({ type: 'widget_unmount' });
       model.off('msg:custom', handleCustomMessage);
+      model.off('change:spark_ui_url', handleSparkUiUrlChange);
     };
   },
 

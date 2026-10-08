@@ -41,7 +41,9 @@ def test_start_server(monitor_extension):
   """Test TCP server binds and starts socket thread."""
   with mock.patch.object(socket, "socket") as mock_socket, mock.patch.object(
       kernelextension, "SocketThread"
-  ) as mock_thread, mock.patch.dict("os.environ", {}):
+  ) as mock_thread, mock.patch.object(
+      monitor_extension, "_start_env_thread"
+  ) as mock_start_env, mock.patch.dict("os.environ", {}):
 
     # Setup mock socket
     mock_sock_inst = mock.MagicMock()
@@ -56,6 +58,7 @@ def test_start_server(monitor_extension):
     assert os.environ["SPARK_CELL_MONITOR_KERNEL_PORT"] == "12345"
     mock_thread.assert_called_once()
     mock_thread.return_value.start.assert_called_once()
+    mock_start_env.assert_called_once()
 
 
 def test_pre_run_cell_hook(monitor_extension):
@@ -199,3 +202,181 @@ def test_socket_reader():
   reader.run()
 
   assert mock_extension.send_to_frontend.call_count == 2
+
+
+def test_serverless_spark_ui_url_resolution(monitor_extension, active_widget):
+  """Test Serverless metadata resolution and appId deep-link upgrade."""
+  monitor_extension.active_widgets["test-run-id"] = active_widget
+  metadata_map = {
+      "instance/attributes/dataproc-session-id": "sess-abc-123",
+      "project/project-id": "my-gcp-project",
+      "instance/attributes/dataproc-region": "us-central1",
+  }
+  with mock.patch.object(
+      monitor_extension,
+      "_fetch_metadata",
+      side_effect=lambda path, timeout=0.5: metadata_map.get(path, ""),
+  ), mock.patch.object(
+      monitor_extension, "_read_spark_defaults_app_context", return_value=True
+  ):
+    monitor_extension._resolve_environment_bg()
+
+  assert monitor_extension.env_type == "s8s"
+  assert monitor_extension.spark_ui_url == (
+      "https://console.cloud.google.com/dataproc/interactive/"
+      "us-central1/sess-abc-123/sparkApplications/applications"
+      "?project=my-gcp-project"
+  )
+  assert active_widget.spark_ui_url == monitor_extension.spark_ui_url
+
+  # Upgrade to application deep-link on sparkJobStart
+  monitor_extension.send_to_frontend({
+      "msgtype": "sparkJobStart",
+      "jobGroup": "test-run-id",
+      "jobId": 1,
+      "appId": "app-20261005200000-0001",
+  })
+  assert monitor_extension.spark_ui_url == (
+      "https://console.cloud.google.com/dataproc/interactive/"
+      "us-central1/sess-abc-123/sparkApplications/applications/"
+      "app-20261005200000-0001?project=my-gcp-project"
+  )
+  assert active_widget.spark_ui_url == monitor_extension.spark_ui_url
+
+
+def test_serverless_disabled_when_app_context_false(monitor_extension):
+  """Test Serverless URL is suppressed when spark.dataproc.appContext.enabled=false."""
+  metadata_map = {
+      "instance/attributes/dataproc-session-id": "sess-abc-123",
+      "project/project-id": "my-gcp-project",
+      "instance/attributes/dataproc-region": "us-central1",
+  }
+  with mock.patch.object(
+      monitor_extension,
+      "_fetch_metadata",
+      side_effect=lambda path, timeout=0.5: metadata_map.get(path, ""),
+  ), mock.patch.object(
+      monitor_extension, "_read_spark_defaults_app_context", return_value=False
+  ):
+    monitor_extension._resolve_environment_bg()
+
+  assert monitor_extension.env_type == "s8s"
+  assert monitor_extension.spark_ui_url == ""
+
+
+def test_dpgce_spark_ui_url_and_invalid_appid_filtering(
+    monitor_extension, active_widget, tmp_path
+):
+  """Test DPGCE Component Gateway URL generation and local-*/null rejection."""
+  monitor_extension.active_widgets["test-run-id"] = active_widget
+  props_file = tmp_path / "dataproc.properties"
+  props_file.write_text(
+      "# Dataproc properties\n"
+      "dataproc.proxy.public.hostname.other=https\\://ignored.example.com/\n"
+      "dataproc.proxy.public.hostname=https\\://abc123-dot-us-central1.dataproc.googleusercontent.com/\n",
+      encoding="utf-8",
+  )
+
+  with mock.patch.object(
+      monitor_extension, "_fetch_metadata", return_value=""
+  ), mock.patch.object(
+      kernelextension, "_DATAPROC_PROPERTIES_PATH", str(props_file)
+  ):
+    monitor_extension._resolve_environment_bg()
+
+  assert monitor_extension.env_type == "dpgce"
+  assert (
+      monitor_extension.proxy_hostname
+      == "https://abc123-dot-us-central1.dataproc.googleusercontent.com"
+  )
+  assert monitor_extension.spark_ui_url == ""
+
+  # local-* and "null" appIds must be ignored
+  monitor_extension._update_app_id("null")
+  monitor_extension._update_app_id("local-1700000000000")
+  assert monitor_extension.spark_ui_url == ""
+
+  # Valid YARN application_* ID populates live YARN proxy link
+  monitor_extension.send_to_frontend({
+      "msgtype": "sparkJobStart",
+      "jobGroup": "test-run-id",
+      "jobId": 1,
+      "appId": "application_1700000000000_0002",
+  })
+  assert monitor_extension.spark_ui_url == (
+      "https://abc123-dot-us-central1.dataproc.googleusercontent.com"
+      "/gateway/default/yarn/proxy/application_1700000000000_0002/"
+  )
+  assert active_widget.spark_ui_url == monitor_extension.spark_ui_url
+
+
+def test_off_gce_fallback_no_url(monitor_extension, tmp_path):
+  """Test off-GCE environment resolves to unknown with empty spark_ui_url."""
+  missing_props = tmp_path / "nonexistent.properties"
+  with mock.patch.object(
+      monitor_extension, "_fetch_metadata", return_value=""
+  ), mock.patch.object(
+      kernelextension, "_DATAPROC_PROPERTIES_PATH", str(missing_props)
+  ):
+    monitor_extension._resolve_environment_bg()
+
+  assert monitor_extension.env_type == "unknown"
+  assert monitor_extension.spark_ui_url == ""
+
+
+@pytest.mark.parametrize(
+    "conf_line, expected",
+    [
+        ("spark.dataproc.appContext.enabled true", True),
+        ("spark.dataproc.appContext.enabled=false", False),
+        ("spark.dataproc.appContext.enabled = false", False),
+        ("spark.dataproc.appContext.enabled\tTRUE", True),
+    ],
+)
+def test_read_spark_defaults_app_context_formats(tmp_path, conf_line, expected):
+  """Test spark-defaults.conf parsing for all key/value separators Spark accepts."""
+  conf = tmp_path / "spark-defaults.conf"
+  conf.write_text(
+      "# comment\n"
+      "\n"
+      "spark.other.setting = 1\n"
+      f"{conf_line}\n"
+  )
+  assert (
+      kernelextension.CellMonitorExtension._read_spark_defaults_app_context(
+          str(conf)
+      )
+      is expected
+  )
+
+
+def test_read_spark_defaults_app_context_defaults_to_true(tmp_path):
+  """Test missing file or missing key leaves app context enabled."""
+  read = kernelextension.CellMonitorExtension._read_spark_defaults_app_context
+  assert read(str(tmp_path / "missing.conf")) is True
+  conf = tmp_path / "spark-defaults.conf"
+  conf.write_text("spark.other.setting=true\n")
+  assert read(str(conf)) is True
+
+
+def test_pre_run_cell_hook_seeds_widget_with_current_spark_ui_url(
+    monitor_extension,
+):
+  """Test a widget created after the URL resolved starts with that URL."""
+  monitor_extension.env_type = "s8s"
+  monitor_extension.project_id = "my-gcp-project"
+  monitor_extension.region = "us-central1"
+  monitor_extension.dataproc_session_id = "sess-abc-123"
+  monitor_extension._refresh_spark_ui_url()
+  expected_url = monitor_extension.spark_ui_url
+  assert expected_url.startswith("https://console.cloud.google.com/")
+
+  mock_pyspark_sql = mock.MagicMock()
+  mock_pyspark_sql.SparkSession.getActiveSession.return_value = None
+  mock_pyspark_sql.SparkSession.getDefaultSession.return_value = None
+  with mock.patch("IPython.display.display"), mock.patch.dict(
+      "sys.modules", {"pyspark": mock.MagicMock(), "pyspark.sql": mock_pyspark_sql}
+  ):
+    monitor_extension.pre_run_cell_hook()
+  widget = monitor_extension.active_widgets[monitor_extension.run_id]
+  assert widget.spark_ui_url == expected_url

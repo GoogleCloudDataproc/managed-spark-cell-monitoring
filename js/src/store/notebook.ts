@@ -26,6 +26,7 @@ export class NotebookStore {
   applicationName?: string;
   applicationId?: string;
   applicationAttemptId?: string;
+  viewUrl: string | undefined = undefined;
   uniqueId = 'default-key';
   hideAllDisplays = false;
 
@@ -38,6 +39,10 @@ export class NotebookStore {
     if (notebookPanelId && notebookPanelId !== 'default-key') {
       this.uniqueId = notebookPanelId;
     }
+  }
+
+  setViewUrl(url?: string) {
+    this.viewUrl = url || undefined;
   }
 
   resetNotebook() {
