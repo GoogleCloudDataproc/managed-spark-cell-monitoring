@@ -103,15 +103,77 @@ describe('MobX Store Tests', () => {
       appId: 'AppId1'
     });
     expect(nbStore.applicationName).toBe('App1');
+  });
 
-    nbStore.onSparkExecutorAdded({
-      executorId: 'exec1',
-      hostPort: '127.0.0.1:9090',
-      cores: 4
+  describe('executor and core counts', () => {
+    it('uses the counts carried by the listener payload when present', () => {
+      nbStore.onSparkExecutorAdded({ executorId: 'exec1', totalCores: 8, numExecutors: 2 });
+      expect(nbStore.numExecutors).toBe(2);
+      expect(nbStore.numTotalCores).toBe(8);
+
+      nbStore.onSparkExecutorRemoved({ executorId: 'exec1', totalCores: 4, numExecutors: 1 });
+      expect(nbStore.numExecutors).toBe(1);
+      expect(nbStore.numTotalCores).toBe(4);
     });
 
-    nbStore.onSparkExecutorRemoved({
-      executorId: 'exec1'
+    it('falls back to counting locally when the payload has no numExecutors', () => {
+      nbStore.onSparkExecutorAdded({ executorId: 'exec1', totalCores: 4 });
+      nbStore.onSparkExecutorAdded({ executorId: 'exec2', totalCores: 8 });
+      expect(nbStore.numExecutors).toBe(2);
+      expect(nbStore.numTotalCores).toBe(8);
+
+      nbStore.onSparkExecutorRemoved({ executorId: 'exec1', totalCores: 4 });
+      expect(nbStore.numExecutors).toBe(1);
+
+      nbStore.onSparkExecutorRemoved({ executorId: 'exec2', totalCores: 0 });
+      nbStore.onSparkExecutorRemoved({ executorId: 'exec2', totalCores: 0 });
+      expect(nbStore.numExecutors).toBe(0);
+      expect(nbStore.numTotalCores).toBe(0);
+    });
+
+    it('keeps known counts when a payload carries none', () => {
+      nbStore.onSparkExecutorAdded({ executorId: 'exec1', totalCores: 8, numExecutors: 2 });
+      nbStore.onSparkJobStart('cell-1', { jobId: 9, name: 'Job', stageIds: [], status: 'RUNNING' });
+      expect(nbStore.numExecutors).toBe(2);
+      expect(nbStore.numTotalCores).toBe(8);
+
+      nbStore.onSparkExecutorRemoved({ executorId: 'exec1' });
+      expect(nbStore.numExecutors).toBe(1);
+      expect(nbStore.numTotalCores).toBe(8);
+    });
+
+    it('clamps negative counts from the payload to zero', () => {
+      nbStore.onSparkExecutorRemoved({ executorId: 'exec1', totalCores: -4, numExecutors: -1 });
+      expect(nbStore.numExecutors).toBe(0);
+      expect(nbStore.numTotalCores).toBe(0);
+
+      nbStore.onSparkExecutorAdded({ executorId: 'exec1', totalCores: -1, numExecutors: -2 });
+      expect(nbStore.numExecutors).toBe(0);
+      expect(nbStore.numTotalCores).toBe(0);
+    });
+
+    it('clamps the counts carried by sparkJobStart', () => {
+      nbStore.onSparkJobStart('cell-1', {
+        jobId: 7,
+        name: 'Job',
+        stageIds: [],
+        status: 'RUNNING',
+        totalCores: -3,
+        numExecutors: -1
+      });
+      expect(nbStore.numExecutors).toBe(0);
+      expect(nbStore.numTotalCores).toBe(0);
+
+      nbStore.onSparkJobStart('cell-1', {
+        jobId: 8,
+        name: 'Job',
+        stageIds: [],
+        status: 'RUNNING',
+        totalCores: 16,
+        numExecutors: 4
+      });
+      expect(nbStore.numExecutors).toBe(4);
+      expect(nbStore.numTotalCores).toBe(16);
     });
   });
 

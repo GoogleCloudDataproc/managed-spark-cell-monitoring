@@ -505,15 +505,22 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
 
   /** Called when an executor is added. */
   override def onExecutorAdded(executorAdded: SparkListenerExecutorAdded): Unit = synchronized {
-    executorCores(executorAdded.executorId) = executorAdded.executorInfo.totalCores
-    totalCores += executorAdded.executorInfo.totalCores
+    val execId = executorAdded.executorId
+    val cores = executorAdded.executorInfo.totalCores
+    executorCores.remove(execId).foreach { previousCores =>
+      totalCores = math.max(0, totalCores - previousCores)
+      numExecutors = math.max(0, numExecutors - 1)
+    }
+    executorCores(execId) = cores
+    totalCores += cores
     numExecutors += 1
     val json = ("msgtype" -> "sparkExecutorAdded") ~
-      ("executorId" -> executorAdded.executorId) ~
+      ("executorId" -> execId) ~
       ("time" -> executorAdded.time) ~
       ("host" -> executorAdded.executorInfo.executorHost) ~
-      ("numCores" -> executorAdded.executorInfo.totalCores) ~
-      ("totalCores" -> totalCores) // Sending this as browser data can be lost during reloads
+      ("numCores" -> cores) ~
+      ("totalCores" -> totalCores) ~ // Sending this as browser data can be lost during reloads
+      ("numExecutors" -> numExecutors)
 
     send(compact(render(json)))
   }
@@ -521,12 +528,15 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
   /** Called when an executor is removed. */
   override def onExecutorRemoved(
       executorRemoved: SparkListenerExecutorRemoved): Unit = synchronized {
-    totalCores -= executorCores.getOrElse(executorRemoved.executorId, 0)
-    numExecutors -= 1
+    executorCores.remove(executorRemoved.executorId).foreach { removedCores =>
+      totalCores = math.max(0, totalCores - removedCores)
+      numExecutors = math.max(0, numExecutors - 1)
+    }
     val json = ("msgtype" -> "sparkExecutorRemoved") ~
       ("executorId" -> executorRemoved.executorId) ~
       ("time" -> executorRemoved.time) ~
-      ("totalCores" -> totalCores) // Sending this as browser data can be lost during reloads
+      ("totalCores" -> totalCores) ~ // Sending this as browser data can be lost during reloads
+      ("numExecutors" -> numExecutors)
 
 
     send(compact(render(json)))

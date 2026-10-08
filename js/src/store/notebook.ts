@@ -106,9 +106,14 @@ export class NotebookStore {
     }
 
     // These values are set here as previous messages may
-    // be missed if reconnecting from a browser reload.
-    this.numTotalCores = data.totalCores;
-    this.numExecutors = data.numExecutors;
+    // be missed if reconnecting from a browser reload. Only valid numbers
+    // are applied so a payload without them cannot clear known counts.
+    if (typeof data.totalCores === 'number') {
+      this.numTotalCores = Math.max(0, data.totalCores);
+    }
+    if (typeof data.numExecutors === 'number') {
+      this.numExecutors = Math.max(0, data.numExecutors);
+    }
 
     const job = existingJob || new SparkJob(this);
     job.uniqueId = uniqueJobId;
@@ -307,19 +312,25 @@ export class NotebookStore {
   }
 
   onSparkExecutorAdded(data: any) {
-    this.numTotalCores = data.totalCores;
-    if (!this.numExecutors) {
-      this.numExecutors = 0;
+    if (typeof data.totalCores === 'number') {
+      this.numTotalCores = Math.max(0, data.totalCores);
     }
-    this.numExecutors += 1;
+    if (typeof data.numExecutors === 'number') {
+      this.numExecutors = Math.max(0, data.numExecutors);
+    } else {
+      this.numExecutors = (this.numExecutors ?? 0) + 1;
+    }
   }
 
   onSparkExecutorRemoved(data: any) {
-    this.numTotalCores = data.totalCores;
-    if (!this.numExecutors) {
-      this.numExecutors = 0;
+    if (typeof data.totalCores === 'number') {
+      this.numTotalCores = Math.max(0, data.totalCores);
     }
-    this.numExecutors -= 1;
+    if (typeof data.numExecutors === 'number') {
+      this.numExecutors = Math.max(0, data.numExecutors);
+    } else {
+      this.numExecutors = Math.max(0, (this.numExecutors ?? 0) - 1);
+    }
   }
 
   onSparkTaskStart(data: any) {
