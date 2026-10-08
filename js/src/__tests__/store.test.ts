@@ -15,15 +15,18 @@
  * limitations under the License.
  */
 
+import { autorun, isObservableProp } from 'mobx';
 import { Cell } from '../store/cell';
 import { NotebookStore } from '../store/notebook';
 import { SparkJob } from '../store/spark-job';
+import { SparkStage } from '../store/spark-stage';
 
 describe('MobX Store Tests', () => {
   let nbStore: NotebookStore;
-  
+
   beforeEach(() => {
     nbStore = new NotebookStore('test-nb');
+    nbStore.cells['cell-1'] = new Cell('cell-1', nbStore);
   });
 
   it('initializes a Cell store correctly and tests view changes', () => {
@@ -31,78 +34,122 @@ describe('MobX Store Tests', () => {
     expect(cell.cellId).toBe('cell-1');
     expect(cell.uniqueJobIds).toEqual([]);
     expect(cell.view).toBe('jobs');
-    
+    expect(cell.cellFinished).toBe(false);
+
+    cell.setCellFinished(true);
     cell.reset();
     expect(cell.isRemoved).toBe(false);
-    cell.isHeaderCollapsed = false;
+    expect(cell.cellFinished).toBe(false);
   });
 
-  it('correctly maps jobs and stages in NotebookStore', () => {
-    const cell = new Cell('cell-1', nbStore);
-    nbStore.cells['cell-1'] = cell;
-
-    nbStore.onSparkStageSubmitted('cell-1', {
+  it('tracks a job through its stages and aggregates task counts', () => {
+    nbStore.onSparkStageSubmitted({
       msgtype: 'sparkStageSubmitted',
       stageId: 1,
-      name: 'Test Stage',
-      numTasks: 10
+      numTasks: 10,
     });
-    
     nbStore.onSparkJobStart('cell-1', {
       msgtype: 'sparkJobStart',
       jobId: 1,
-      name: 'Test Job',
-      stageIds: [1],
-      status: 'RUNNING'
+      name: 'Test Job at <console>:1',
+      stageIds: [1, 2],
+      stageInfos: { 1: { numTasks: 10, name: 'stage one' }, 2: { numTasks: 4, name: 'stage two' } },
+      numTasks: 14,
+      status: 'RUNNING',
+      submissionTime: 1000,
     });
-    
-    expect(Object.keys(nbStore.jobs).length).toBe(1);
-    expect(nbStore.jobs['test-nb-job-1'].status).toBe('RUNNING');
-    expect(nbStore.jobs['test-nb-job-1'].name).toBe('Test Job');
-    
+
+    const job = nbStore.jobs['test-nb-job-1'];
+    expect(job.status).toBe('RUNNING');
+    expect(job.name).toBe('Test Job');
+    expect(job.uniqueStageIds).toEqual(['test-nb-stage-1', 'test-nb-stage-2']);
+    expect(job.numTasks).toBe(14);
+    expect(nbStore.cells['cell-1'].uniqueJobIds).toEqual(['test-nb-job-1']);
+
     nbStore.onSparkStageActive({
       msgtype: 'sparkStageActive',
       stageId: 1,
       numActiveTasks: 2,
       numCompletedTasks: 3,
-      numFailedTasks: 0
+      numFailedTasks: 1,
     });
-    
-    nbStore.onSparkTaskStart({
-      msgtype: 'sparkTaskStart',
-      stageId: 1,
-      taskId: 1,
-      launchTime: 50
-    });
+    expect(job.numActiveTasks).toBe(2);
+    expect(job.numCompletedTasks).toBe(3);
+    expect(job.numFailedTasks).toBe(1);
 
-    nbStore.onSparkTaskEnd({
-      msgtype: 'sparkTaskEnd',
-      stageId: 1,
-      taskId: 1,
-      finishTime: 100
-    });
-    
     nbStore.onSparkStageCompleted({
       msgtype: 'sparkStageCompleted',
       stageId: 1,
       status: 'COMPLETED',
-      submissionTime: '1000',
-      completionTime: '2000'
+      numTasks: 10,
+      numCompletedTasks: 9,
+      numFailedTasks: 1,
+      submissionTime: 1500,
+      completionTime: 2000,
     });
-    
     expect(nbStore.stages['test-nb-stage-1'].status).toBe('COMPLETED');
-    
-    nbStore.onSparkJobEnd({
+    // Timing metadata is retained for a future timeline view.
+    expect(nbStore.stages['test-nb-stage-1'].name).toBe('stage one');
+    expect(nbStore.stages['test-nb-stage-1'].submissionTime?.getTime()).toBe(1500);
+    expect(nbStore.stages['test-nb-stage-1'].completionTime?.getTime()).toBe(2000);
+    expect(job.numActiveTasks).toBe(0);
+    expect(job.numCompletedTasks).toBe(9);
+
+    // Stage 2 was never submitted; at job end it is skipped and counts as done.
+    nbStore.onSparkJobEnd({ jobId: 1, status: 'COMPLETED', completionTime: 3000 });
+    expect(job.status).toBe('COMPLETED');
+    expect(job.endTime?.getTime()).toBe(3000);
+    expect(nbStore.stages['test-nb-stage-2'].status).toBe('SKIPPED');
+    expect(job.numTasks).toBe(14);
+    expect(job.numCompletedTasks).toBe(13);
+  });
+
+  it('refreshes job totals when a stage is submitted with a different task count', () => {
+    nbStore.onSparkJobStart('cell-1', {
+      msgtype: 'sparkJobStart',
       jobId: 1,
-      status: 'SUCCEEDED'
+      name: 'Test Job',
+      stageIds: [1, 2],
+      stageInfos: { 1: { numTasks: 10, name: 'stage one' }, 2: { numTasks: 4, name: 'stage two' } },
+      numTasks: 14,
+      status: 'RUNNING',
+      submissionTime: 1000,
     });
-    expect(nbStore.jobs['test-nb-job-1'].status).toBe('SUCCEEDED');
-    
-    nbStore.onSparkApplicationStart({
-      appName: 'App1',
-      appId: 'AppId1'
+    const job = nbStore.jobs['test-nb-job-1'];
+    expect(job.numTasks).toBe(14);
+
+    // Adaptive execution submits stage 2 with more tasks than planned.
+    nbStore.onSparkStageSubmitted({ msgtype: 'sparkStageSubmitted', stageId: 2, numTasks: 6 });
+    expect(job.numTasks).toBe(16);
+  });
+
+  it('ignores a replayed stage completion and a replayed job end', () => {
+    nbStore.onSparkJobStart('cell-1', {
+      jobId: 1,
+      name: 'job',
+      stageIds: [1],
+      stageInfos: { 1: { numTasks: 5, name: 's' } },
+      numTasks: 5,
+      status: 'RUNNING',
+      submissionTime: 1000,
     });
-    expect(nbStore.applicationName).toBe('App1');
+    const completed = {
+      stageId: 1,
+      status: 'COMPLETED',
+      numTasks: 5,
+      numCompletedTasks: 5,
+      numFailedTasks: 0,
+      completionTime: 2000,
+    };
+    nbStore.onSparkStageCompleted(completed);
+    nbStore.onSparkStageActive({ stageId: 1, numActiveTasks: 3, numCompletedTasks: 1, numFailedTasks: 0 });
+    nbStore.onSparkStageCompleted({ ...completed, numCompletedTasks: 1 });
+    expect(nbStore.jobs['test-nb-job-1'].numCompletedTasks).toBe(5);
+
+    nbStore.onSparkJobEnd({ jobId: 1, status: 'COMPLETED', completionTime: 3000 });
+    nbStore.onSparkJobEnd({ jobId: 1, status: 'FAILED', completionTime: 4000 });
+    expect(nbStore.jobs['test-nb-job-1'].status).toBe('COMPLETED');
+    expect(nbStore.jobs['test-nb-job-1'].endTime?.getTime()).toBe(3000);
   });
 
   describe('executor and core counts', () => {
@@ -177,42 +224,64 @@ describe('MobX Store Tests', () => {
     });
   });
 
-  it('correctly updates TaskChartStore through Cell', () => {
-    const cell = new Cell('cell-1', nbStore);
-    nbStore.cells['cell-1'] = cell;
-
-    cell.taskChartStore.onSparkTaskStart({
-      stageId: 2,
-      taskId: 2,
-      launchTime: 50,
-      executorId: 'exec1',
-      host: 'localhost'
+  it('falls back to the last stage name when the job has no call site', () => {
+    nbStore.onSparkJobStart('cell-1', {
+      jobId: 7,
+      name: 'null',
+      stageIds: [3, 4],
+      stageInfos: { 3: { numTasks: 1, name: 'first' }, 4: { numTasks: 1, name: 'collect at x' } },
+      numTasks: 2,
+      status: 'RUNNING',
+      submissionTime: 1,
     });
-
-    cell.taskChartStore.onSparkTaskEnd({
-      stageId: 2,
-      taskId: 2,
-      finishTime: 100,
-      taskMetrics: {
-        executorRunTime: 40
-      },
-      taskType: 'ResultTask'
-    });
-    
-    expect(cell.taskChartStore.taskDataX.length).toBeGreaterThanOrEqual(1);
-    expect(cell.taskChartStore.taskDataY.length).toBeGreaterThanOrEqual(1);
+    expect(nbStore.jobs['test-nb-job-7'].name).toBe('collect at x');
   });
 
-  it('computes logic for SparkJob correctly', () => {
-    const job = new SparkJob(nbStore);
-    job.uniqueId = 'test-job-uniq';
-    job.status = 'COMPLETED';
-    nbStore.stages['test-stage-1'] = { status: 'PENDING' } as any;
-    job.uniqueStageIds = ['test-stage-1'];
+  it('records application and executor information', () => {
+    nbStore.onSparkApplicationStart({ appId: 'app-1', appAttemptId: '1' });
+    expect(nbStore.applicationId).toBe('app-1');
+    expect(nbStore.uniqueId).toBe('appapp-1-attempt1');
 
-    // without stage initialized, numActiveStages shouldn't crash
-    expect(job.numActiveStages).toBe(1);
-    expect(job.numFailedStages).toBe(0);
-    expect(job.numCompletedStages).toBe(0);
+    nbStore.onSparkExecutorAdded({ executorId: 'exec1', totalCores: 4 });
+    nbStore.onSparkExecutorAdded({ executorId: 'exec2', totalCores: 8 });
+    expect(nbStore.numExecutors).toBe(2);
+    expect(nbStore.numTotalCores).toBe(8);
+
+    nbStore.onSparkExecutorRemoved({ executorId: 'exec1', totalCores: 4 });
+    expect(nbStore.numExecutors).toBe(1);
+    expect(nbStore.numTotalCores).toBe(4);
+  });
+
+  it('feeds the task chart from stage updates', () => {
+    const cell = nbStore.cells['cell-1'];
+    nbStore.onSparkJobStart('cell-1', {
+      jobId: 1,
+      name: 'job',
+      stageIds: [1],
+      stageInfos: { 1: { numTasks: 5, name: 's' } },
+      numTasks: 5,
+      status: 'RUNNING',
+      submissionTime: 1000,
+    });
+    nbStore.onSparkStageSubmitted({ stageId: 1, numTasks: 5 });
+    nbStore.onSparkStageActive({ stageId: 1, numActiveTasks: 3, numCompletedTasks: 0, numFailedTasks: 0, time: 1500 });
+
+    expect(cell.taskChartStore.taskDataX).toContain(1500);
+    expect(cell.taskChartStore.taskDataY[cell.taskChartStore.taskDataY.length - 1]).toBe(3);
+  });
+
+  it('makes optional job, stage and notebook fields observable', () => {
+    const job = new SparkJob();
+    expect(isObservableProp(job, 'endTime')).toBe(true);
+    expect(isObservableProp(nbStore, 'numExecutors')).toBe(true);
+    const stage = new SparkStage();
+    expect(isObservableProp(stage, 'submissionTime')).toBe(true);
+    expect(isObservableProp(stage, 'completionTime')).toBe(true);
+
+    const seen: Array<Date | undefined> = [];
+    const dispose = autorun(() => seen.push(job.endTime));
+    job.endTime = new Date(5);
+    dispose();
+    expect(seen).toHaveLength(2);
   });
 });

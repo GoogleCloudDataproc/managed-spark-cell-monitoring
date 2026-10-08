@@ -80,7 +80,7 @@ function addJob(
   // act() flushes the observer re-render triggered by the store mutation.
   act(() => {
     runInAction(() => {
-      const job = new SparkJob(notebook);
+      const job = new SparkJob();
       job.uniqueId = `nb-job-${options.id}`;
       job.jobId = String(options.id);
       job.name = options.name;

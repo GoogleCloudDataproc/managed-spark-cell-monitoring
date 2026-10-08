@@ -26,12 +26,11 @@ import { SparkJob } from '../store/spark-job';
 describe('Header Component', () => {
   it('renders and allows tab switching', () => {
     const notebookStore = new NotebookStore('test-nb');
-    notebookStore.applicationName = 'Test App';
     const cellStore = new Cell('test-cell', notebookStore);
     cellStore.isHeaderCollapsed = false;
     cellStore.isRemoved = false;
 
-    const job = new SparkJob(notebookStore);
+    const job = new SparkJob();
     job.uniqueId = 'test-nb-job-1';
     job.status = 'RUNNING';
     job.numTasks = 10;

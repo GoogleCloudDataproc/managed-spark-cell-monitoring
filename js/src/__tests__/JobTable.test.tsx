@@ -38,7 +38,7 @@ function renderTable(startTime = new Date(2025, 0, 1, 15, 36, 3)) {
   const cellStore = new Cell('test-cell', notebookStore);
   notebookStore.cells['test-cell'] = cellStore;
 
-  const job = new SparkJob(notebookStore);
+  const job = new SparkJob();
   job.uniqueId = 'test-nb-job-1';
   job.jobId = '1';
   job.name = 'Test Job 1';

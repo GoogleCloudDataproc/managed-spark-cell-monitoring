@@ -73,44 +73,9 @@ export class TaskChartStore {
     this.addTaskData(completionTime, 0);
   }
 
-  onSparkTaskStart(data: any) {
-    this.addTaskData(data.launchTime, this.numActiveTasks);
-    this.numActiveTasks += 1;
-    this.addTaskData(data.launchTime, this.numActiveTasks);
-  }
-
-  onSparkTaskEnd(data: any) {
-    this.addTaskData(data.finishTime, this.numActiveTasks);
-    this.numActiveTasks = Math.max(0, this.numActiveTasks - 1);
-    this.addTaskData(data.finishTime, this.numActiveTasks);
-  }
-
   onSparkStageActive(time: number, numActiveTasks: number) {
     this.numActiveTasks = numActiveTasks;
     this.addTaskData(time, numActiveTasks);
-  }
-
-  loadGraphSnapshot(graph: any) {
-    if (!graph) return;
-    const newX: number[] = [];
-    const newY: number[] = [];
-    Object.values(graph).forEach((points: any) => {
-      if (Array.isArray(points)) {
-        points.forEach((pt: any) => {
-          const t = new Date(pt.timestamp || pt.time || Date.now()).getTime();
-          const activeTasks = pt.activeTasks ?? pt.numActiveTasks ?? 0;
-          newX.push(t);
-          newY.push(activeTasks);
-        });
-      }
-    });
-    if (newX.length > 0) {
-      this.taskDataX = newX;
-      this.taskDataY = newY;
-      const numCores = this.notebookStore.numTotalCores || 0;
-      this.executorDataX = newX.slice();
-      this.executorDataY = newX.map(() => numCores);
-    }
   }
 }
 
