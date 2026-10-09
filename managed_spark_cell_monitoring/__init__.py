@@ -36,7 +36,7 @@ def get_jar_path(spark_version: str = "3") -> str:
     FileNotFoundError: If the listener JAR file does not exist.
   """
   listeners_dir = pathlib.Path(__file__).parent / "static" / "listeners"
-  version_str = __version__ if __version__ != "unknown" else "0.1.0"
+  version_str = __version__ if __version__ != "unknown" else "1.0.0"
   target_name = f"managed-spark-cell-monitoring-spark{spark_version}-assembly-{version_str}.jar"
   target_path = listeners_dir / target_name
   if not target_path.is_file():
