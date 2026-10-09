@@ -107,26 +107,8 @@ progress {
 .pm .tdstatus {
   padding: 2px;
 }
-.pm .running {
-  background-color: #6991d6;
-}
-.pm .failed {
-  background-color: #db3636;
-}
-.pm .completed {
-  background-color: #6dd58c;
-}
-
-.pm .completed,
-.pm .failed,
-.pm .running {
-  font-size: 75%;
-  color: white;
-  border-radius: 2px;
-}
-.pm .tdjobstatus > span {
-  padding: 4px 8px;
-}
+/* Job status is rendered as plain text: no badge background, colour or
+ * padding for any status value (running, completed, failed, ...). */
 .pm .cssprogress-container {
   display: flex;
   align-items: center;
