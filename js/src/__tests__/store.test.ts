@@ -270,6 +270,30 @@ describe('MobX Store Tests', () => {
     expect(cell.taskChartStore.taskDataY[cell.taskChartStore.taskDataY.length - 1]).toBe(3);
   });
 
+  it('prefers the listener-provided sample time over the browser clock', () => {
+    const cell = nbStore.cells['cell-1'];
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(999_999);
+    try {
+      nbStore.onSparkJobStart('cell-1', {
+        jobId: 2,
+        name: 'job',
+        stageIds: [2],
+        stageInfos: { 2: { numTasks: 5, name: 's' } },
+        numTasks: 5,
+        status: 'RUNNING',
+        submissionTime: 1000,
+      });
+      nbStore.onSparkStageSubmitted({ stageId: 2, numTasks: 5 });
+      nbStore.onSparkStageActive({ stageId: 2, numActiveTasks: 2, numCompletedTasks: 0, numFailedTasks: 0, time: 1250 });
+
+      const xs = cell.taskChartStore.taskDataX;
+      expect(xs[xs.length - 1]).toBe(1250);
+      expect(xs).not.toContain(999_999);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('makes optional job, stage and notebook fields observable', () => {
     const job = new SparkJob();
     expect(isObservableProp(job, 'endTime')).toBe(true);
