@@ -84,8 +84,33 @@
   line-height: 25px;
 }
 
+/* Column sizing (auto table layout, every column centred):
+ * - Start Time, Status and Duration keep fixed shares (20% / 12% / 12%).
+ * - Job Name keeps an 18% floor so short names sit visibly centred rather
+ *   than hugging the left edge; longer names make the column grow beyond
+ *   that (auto layout always honours content); the full name is also
+ *   exposed via the title tooltip.
+ * - Tasks has no width, so it receives whatever is left over, but it is never
+ *   squeezed below the 160px the progress bar needs.
+ * - Once a name would push Tasks below that floor it is clipped with an
+ *   ellipsis instead of widening the table past the widget. The cap is
+ *   derived from the wrapper's width via container-query units:
+ *   100cqw - 44cqw (fixed columns) - 184px (Tasks floor + th padding)
+ *   - 12px (name cell padding). */
+.pm .jobtable-content {
+  container-type: inline-size;
+}
 .pm th.thjobname {
-  width: 24%;
+  width: 18%;
+}
+.pm .tdjobname .jobname {
+  display: block;
+  min-width: 10ch;
+  /* Fallback for hosts without container-query units; overridden below. */
+  max-width: 30ch;
+  max-width: max(10ch, calc(56cqw - 196px));
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .pm th.thjobstart {
@@ -95,10 +120,15 @@
   width: 12%;
 }
 .pm th.thjobtasks {
-  width: 32%;
+  min-width: 160px;
 }
 .pm th.thjobtime {
   width: 12%;
+}
+.pm .jobrow > td.tdjobstarttime,
+.pm .jobrow > td.tdjobstatus,
+.pm .jobrow > td.tdjobduration {
+  white-space: nowrap;
 }
 
 progress {
