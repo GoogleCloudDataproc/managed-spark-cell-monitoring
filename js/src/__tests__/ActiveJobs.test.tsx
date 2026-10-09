@@ -15,8 +15,6 @@
  * limitations under the License.
  */
 
-import fs from 'fs';
-import path from 'path';
 import React from 'react';
 import { runInAction } from 'mobx';
 import { act, fireEvent, render, screen } from '@testing-library/react';
@@ -508,24 +506,28 @@ describe('ConsoleLink in header', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
 
-  it('does not keep focus after being clicked, like the <span> tab buttons', () => {
+  it('is not focused by mouse interaction, so no focus ring can linger after a click', () => {
+    renderHeader({ viewUrl: 'https://console.cloud.google.com/dataproc/clusters' });
+    const link = screen.getByRole('link');
+    // Browsers focus an <a> on mousedown unless the default is prevented;
+    // every mouse button goes through mousedown, including middle/ctrl-click
+    // which never fire `click`.
+    for (const button of [0, 1]) {
+      const allowedDefault = fireEvent.mouseDown(link, { button });
+      expect(allowedDefault).toBe(false);
+    }
+    expect(link).not.toHaveFocus();
+    // Navigation is untouched: click still runs its default action.
+    expect(fireEvent.click(link)).toBe(true);
+  });
+
+  it('can still be focused from the keyboard', () => {
     renderHeader({ viewUrl: 'https://console.cloud.google.com/dataproc/clusters' });
     const link = screen.getByRole('link');
     link.focus();
     expect(link).toHaveFocus();
-    fireEvent.click(link);
-    expect(link).not.toHaveFocus();
-  });
-
-  it('has no focus-only circle styling; the circle comes from hover alone', () => {
-    const css = fs.readFileSync(path.join(__dirname, '../../style/header.css'), 'utf8');
-    const focusRules = Array.from(css.matchAll(/([^{}]+)\{([^}]*)\}/g)).filter((m) =>
-      /console-link:focus/.test(m[1]),
-    );
-    expect(focusRules.length).toBeGreaterThan(0);
-    for (const [, , decl] of focusRules) {
-      expect(decl.trim()).toMatch(/^outline\s*:\s*none;?$/);
-    }
+    fireEvent.keyDown(link, { key: 'Tab' });
+    expect(link).toHaveFocus();
   });
 
   it('reads viewUrl reactively from NotebookStore when prop is not passed', () => {
