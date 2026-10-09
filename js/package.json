@@ -1,6 +1,6 @@
 {
   "name": "managed-spark-cell-monitoring",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Frontend for Managed Spark Cell Monitoring",
   "private": true,
   "scripts": {
