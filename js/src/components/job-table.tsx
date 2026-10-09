@@ -72,12 +72,13 @@ const JobItem = observer((props: { jobId: string }) => {
     isValidTimestamp(job.endTime) && isValidTimestamp(job.startTime)
       ? Math.max(0, job.endTime.getTime() - job.startTime.getTime())
       : NaN;
+  const jobName = job.name || 'Unnamed';
   return (
     <tr className="jobrow">
       <td className="tdjobname">
         {/* Inner span keeps the name on one line; the title exposes the full name. */}
-        <span className="jobname" title={job.name ? job.name : 'Unnamed'}>
-          {job.name ? job.name : 'Unnamed'}
+        <span className="jobname" title={jobName}>
+          {jobName}
         </span>
       </td>
       <td className="tdjobstarttime" title={formatStartTimestamp(job.startTime)}>

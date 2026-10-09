@@ -106,6 +106,8 @@
 .pm .tdjobname .jobname {
   display: block;
   min-width: 10ch;
+  /* Fallback for hosts without container-query units; overridden below. */
+  max-width: 30ch;
   max-width: max(10ch, calc(56cqw - 196px));
   overflow: hidden;
   text-overflow: ellipsis;

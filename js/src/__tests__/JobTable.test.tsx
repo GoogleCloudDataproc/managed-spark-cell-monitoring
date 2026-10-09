@@ -246,7 +246,11 @@ describe('job status stylesheet', () => {
 describe('job table column sizing stylesheet', () => {
   let css: string;
   beforeAll(() => {
-    css = fs.readFileSync(path.join(__dirname, '../../style/jobtable.css'), 'utf8');
+    css = fs
+      .readFileSync(path.join(__dirname, '../../style/jobtable.css'), 'utf8')
+      // Drop comments so a class name mentioned in prose is never mistaken
+      // for a selector.
+      .replace(/\/\*[\s\S]*?\*\//g, '');
   });
   // Returns the declarations of every rule whose selector list mentions `cls`.
   const rulesFor = (cls: string) =>
