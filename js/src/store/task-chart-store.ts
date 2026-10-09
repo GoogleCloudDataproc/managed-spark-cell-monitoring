@@ -44,17 +44,38 @@ export class TaskChartStore {
     this.executorDataY.push(numCores);
   }
 
+  /**
+   * Returns `time` clamped so the series never goes backwards.
+   *
+   * The chart is drawn as a step line in insertion order. Timestamps come from
+   * the Spark driver (job/stage events) and, with an older listener JAR, from
+   * the browser clock (periodic task samples). Clock skew, delivery latency
+   * and the 250ms sampling timer can therefore deliver a point whose time is
+   * earlier than the previous one; plotting it as-is folds the line back on
+   * itself. Clamping to the last plotted time keeps the step semantics ("state
+   * changed no earlier than the previous point") and keeps the task and
+   * executor series aligned index-for-index.
+   */
+  private monotonic(time: number): number {
+    const last = this.taskDataX[this.taskDataX.length - 1];
+    const t = new Date(time).getTime();
+    if (Number.isNaN(t)) {
+      // An unparsable timestamp must not poison the series; reuse the last
+      // plotted time (or "now" for the very first point).
+      return last ?? Date.now();
+    }
+    return last === undefined ? t : Math.max(t, last);
+  }
+
   addTaskData(time: number, numTasks: number) {
-    this.taskDataX.push(new Date(time).getTime());
+    const t = this.monotonic(time);
+    this.taskDataX.push(t);
     this.taskDataY.push(numTasks);
-    this.addExecutorData(
-      new Date(time).getTime(),
-      this.notebookStore.numTotalCores || 0
-    );
+    this.addExecutorData(t, this.notebookStore.numTotalCores || 0);
   }
 
   onSparkJobStart(data: any) {
-    const submissionTimestamp = new Date(data.submissionTime).getTime();
+    const submissionTimestamp = this.monotonic(data.submissionTime);
     this.jobDataX.push(submissionTimestamp);
     this.jobDataY.push(0);
     this.jobDataText.push(`Job ${data.jobId} started`);
@@ -63,9 +84,7 @@ export class TaskChartStore {
   }
 
   onSparkJobEnd(data: any) {
-    const completionTime = new Date(
-      data.completionTime || Date.now()
-    ).getTime();
+    const completionTime = this.monotonic(data.completionTime || Date.now());
     this.jobDataX.push(completionTime);
     this.jobDataY.push(0);
     this.jobDataText.push(`Job ${data.jobId} ended`);
@@ -78,4 +97,3 @@ export class TaskChartStore {
     this.addTaskData(time, numActiveTasks);
   }
 }
-
