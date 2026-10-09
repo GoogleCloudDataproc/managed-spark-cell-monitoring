@@ -506,6 +506,30 @@ describe('ConsoleLink in header', () => {
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
 
+  it('is not focused by mouse interaction, so no focus ring can linger after a click', () => {
+    renderHeader({ viewUrl: 'https://console.cloud.google.com/dataproc/clusters' });
+    const link = screen.getByRole('link');
+    // Browsers focus an <a> on mousedown unless the default is prevented;
+    // every mouse button goes through mousedown, including middle/ctrl-click
+    // which never fire `click`.
+    for (const button of [0, 1]) {
+      const allowedDefault = fireEvent.mouseDown(link, { button });
+      expect(allowedDefault).toBe(false);
+    }
+    expect(link).not.toHaveFocus();
+    // Navigation is untouched: click still runs its default action.
+    expect(fireEvent.click(link)).toBe(true);
+  });
+
+  it('can still be focused from the keyboard', () => {
+    renderHeader({ viewUrl: 'https://console.cloud.google.com/dataproc/clusters' });
+    const link = screen.getByRole('link');
+    link.focus();
+    expect(link).toHaveFocus();
+    fireEvent.keyDown(link, { key: 'Tab' });
+    expect(link).toHaveFocus();
+  });
+
   it('reads viewUrl reactively from NotebookStore when prop is not passed', () => {
     const { notebook } = renderHeader();
     expect(screen.queryByRole('link')).not.toBeInTheDocument();

@@ -54,6 +54,12 @@ export const ConsoleLink = (props: { url?: string; label?: string }) => {
       rel="noopener noreferrer"
       title={label}
       aria-label={`${label} (opens in a new tab)`}
+      // Keep mouse interaction from focusing the link (any button, so this
+      // also covers middle/ctrl-click, which do not fire `click`). The
+      // navigation still happens on click; only the focus side effect is
+      // suppressed, so the focus-visible circle can never linger after the
+      // new tab opens. Keyboard users still reach it with Tab.
+      onMouseDown={(e) => e.preventDefault()}
     >
       <svg width={18} height={18} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
         <path d={OPEN_IN_NEW_ICON_PATH} />
