@@ -78,6 +78,20 @@ describe('TaskChartStore timestamps', () => {
     expect(store.taskDataY).toEqual([0, 1]);
   });
 
+  it('does not plot a missing timestamp at the epoch', () => {
+    // `new Date(null).getTime()` is 0, so null must be treated as missing,
+    // not as a valid 1970 timestamp - including for the very first point.
+    const before = Date.now();
+    store.onSparkJobStart({ jobId: 6, submissionTime: null });
+    expect(store.taskDataX[0]).toBeGreaterThanOrEqual(before);
+
+    store.onSparkStageActive(before + 500, 2);
+    store.onSparkStageActive(null as unknown as number, 1);
+    store.onSparkStageActive(undefined as unknown as number, 0);
+    expect(store.taskDataX.slice(1)).toEqual([before + 500, before + 500, before + 500]);
+    expect(store.taskDataY).toEqual([0, 2, 1, 0]);
+  });
+
   it('reset clears the clamp state', () => {
     store.onSparkJobStart({ jobId: 5, submissionTime: 9000 });
     store.reset();

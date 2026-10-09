@@ -56,12 +56,14 @@ export class TaskChartStore {
    * changed no earlier than the previous point") and keeps the task and
    * executor series aligned index-for-index.
    */
-  private monotonic(time: number): number {
+  private monotonic(time: number | string | null | undefined): number {
     const last = this.taskDataX[this.taskDataX.length - 1];
-    const t = new Date(time).getTime();
-    if (Number.isNaN(t)) {
-      // An unparsable timestamp must not poison the series; reuse the last
-      // plotted time (or "now" for the very first point).
+    // `new Date(null)` is the epoch, not an invalid date, so a missing value
+    // has to be rejected before parsing or it would plot at 1970.
+    const t = time == null ? Number.NaN : new Date(time).getTime();
+    if (!Number.isFinite(t)) {
+      // A missing or unparsable timestamp must not poison the series; reuse
+      // the last plotted time (or "now" for the very first point).
       return last ?? Date.now();
     }
     return last === undefined ? t : Math.max(t, last);
