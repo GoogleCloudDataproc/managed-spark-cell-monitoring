@@ -25,6 +25,7 @@ import urllib.request
 import uuid
 
 import IPython.display
+import managed_spark_cell_monitoring as cell_monitoring
 from managed_spark_cell_monitoring.widget import ManagedSparkCellWidget
 
 ipykernel_imported = True
@@ -312,8 +313,25 @@ class CellMonitorExtension:
   def _handle_generic_event(self, widget, spark_msg):
     widget.append_event(spark_msg, self.sequence_counter)
 
+  def close_all_widgets(self):
+    """Removes every live monitor; used when monitoring is switched off."""
+    with self._env_lock:
+      widgets = list(self.active_widgets.values())
+      self.active_widgets.clear()
+      self.job_to_run_id.clear()
+      self.run_id = None
+    for widget in widgets:
+      try:
+        widget.cleanup(clear_history=True)
+        widget.close()
+      except Exception:  # pylint: disable=broad-exception-caught
+        logger.debug('Error closing cell monitor widget', exc_info=True)
+
   def send_to_frontend(self, msg):
     """Routes a message to the appropriate frontend widget."""
+    if not cell_monitoring.is_enabled():
+      # Keep draining the listener socket, but nothing reaches the frontend.
+      return
     # Strict Formatting Check: Must be a dict and must possess a msgtype.
     if not isinstance(msg, dict):
       logger.warning('Received malformed spark event: expected dictionary')
@@ -374,6 +392,11 @@ class CellMonitorExtension:
       if getattr(cell_info, 'silent', False) or not getattr(cell_info, 'store_history', True):
         self.run_id = None
         return
+
+    if not cell_monitoring.is_enabled():
+      # Monitoring is off: run the cell untouched (no widget, no job group).
+      self.run_id = None
+      return
 
     self.sequence_counter = 0
     self.run_id = str(uuid.uuid4())
@@ -515,6 +538,29 @@ def _patch_spark_context(extension_context):
     logger.warning('Failed to monkey-patch SparkContext: %s', e)
 
 
+def _register_cellmonitor_magic(ipython):
+  """Registers `%cellmonitor on|off|status` as a user-facing toggle."""
+
+  def cellmonitor(line=''):
+    arg = (line or '').strip().lower()
+    if arg in ('on', 'enable', 'enabled', 'true', '1'):
+      cell_monitoring.set_enabled(True)
+    elif arg in ('off', 'disable', 'disabled', 'false', '0'):
+      cell_monitoring.set_enabled(False)
+    elif arg not in ('', 'status'):
+      print('Usage: %cellmonitor [on|off|status]')
+      return
+    state = 'on' if cell_monitoring.is_enabled() else 'off'
+    print(f'Managed Spark cell monitoring is {state}')
+
+  try:
+    ipython.register_magic_function(
+        cellmonitor, magic_kind='line', magic_name='cellmonitor'
+    )
+  except Exception:  # pylint: disable=broad-exception-caught
+    logger.debug('Could not register %%cellmonitor magic', exc_info=True)
+
+
 def load_ipython_extension(ipython):
   """Entrypoint, called when the extension is loaded."""
   if not ipykernel_imported:
@@ -522,9 +568,14 @@ def load_ipython_extension(ipython):
   if not isinstance(ipython, zmqshell.ZMQInteractiveShell):
     return
 
-  # Encapsulate all state within a context object
+  # Encapsulate all state within a context object. The socket server is
+  # started even when monitoring is currently off: the Spark driver reads the
+  # port from the environment once at start-up, so it must always exist for a
+  # later `set_enabled(True)` to work.
   extension_context = CellMonitorExtension(ipython)
   extension_context.start_server()
+  cell_monitoring.add_disable_listener(extension_context.close_all_widgets)
+  _register_cellmonitor_magic(ipython)
 
   if spark_imported:
     _patch_spark_context(extension_context)
