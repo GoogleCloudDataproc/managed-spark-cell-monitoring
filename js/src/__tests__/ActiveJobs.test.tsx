@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+import fs from 'fs';
+import path from 'path';
 import React from 'react';
 import { runInAction } from 'mobx';
 import { act, fireEvent, render, screen } from '@testing-library/react';
@@ -504,6 +506,26 @@ describe('ConsoleLink in header', () => {
   it('rejects non-https URLs', () => {
     renderHeader({ viewUrl: 'javascript:alert(1)' });
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it('does not keep focus after being clicked, like the <span> tab buttons', () => {
+    renderHeader({ viewUrl: 'https://console.cloud.google.com/dataproc/clusters' });
+    const link = screen.getByRole('link');
+    link.focus();
+    expect(link).toHaveFocus();
+    fireEvent.click(link);
+    expect(link).not.toHaveFocus();
+  });
+
+  it('has no focus-only circle styling; the circle comes from hover alone', () => {
+    const css = fs.readFileSync(path.join(__dirname, '../../style/header.css'), 'utf8');
+    const focusRules = Array.from(css.matchAll(/([^{}]+)\{([^}]*)\}/g)).filter((m) =>
+      /console-link:focus/.test(m[1]),
+    );
+    expect(focusRules.length).toBeGreaterThan(0);
+    for (const [, , decl] of focusRules) {
+      expect(decl.trim()).toMatch(/^outline\s*:\s*none;?$/);
+    }
   });
 
   it('reads viewUrl reactively from NotebookStore when prop is not passed', () => {

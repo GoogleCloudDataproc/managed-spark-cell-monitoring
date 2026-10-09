@@ -54,6 +54,10 @@ export const ConsoleLink = (props: { url?: string; label?: string }) => {
       rel="noopener noreferrer"
       title={label}
       aria-label={`${label} (opens in a new tab)`}
+      // Drop focus once clicked so the link does not keep a focus state
+      // after the new tab opens; the neighbouring <span> buttons never hold
+      // focus, so this keeps the hover-only circle treatment consistent.
+      onClick={(e) => e.currentTarget.blur()}
     >
       <svg width={18} height={18} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
         <path d={OPEN_IN_NEW_ICON_PATH} />

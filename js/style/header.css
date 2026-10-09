@@ -148,10 +148,11 @@
 /*
  * Icon-only; sizing and hover come from the shared .tabbutton rules. The
  * icon uses the same grey as the tab icon SVGs (#444746) in both themes so
- * it does not stand out from its neighbours. Host focus rings (VS Code
- * outlines focused <a> elements with its theme's focus colour, which lingers
- * after the link opens a new tab) are suppressed; keyboard focus reuses the
- * tab-button hover treatment instead.
+ * it does not stand out from its neighbours. Unlike those <span> buttons an
+ * <a> is focusable and keeps focus after opening its tab, so host focus rings
+ * (VS Code outlines focused links with its theme colour) are suppressed and
+ * no focus styling is added: like its neighbours, the circle appears on hover
+ * only. The link is also blurred on click (see console-link.tsx).
  */
 .pm .console-link {
   display: inline-flex;
@@ -160,13 +161,9 @@
   color: #444746;
   text-decoration: none;
 }
-.pm .console-link:focus {
-  outline: none;
-}
+.pm .console-link:focus,
 .pm .console-link:focus-visible {
-  background-color: rgba(60, 64, 67, 0.04);
-  border-radius: 50%;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  outline: none;
 }
 
 /* --------------Dark mode-------------------- */
