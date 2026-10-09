@@ -191,8 +191,12 @@ describe('JobTable Component', () => {
 describe('job status stylesheet', () => {
   // Jest maps CSS imports to identity-obj-proxy, so jsdom never sees the real
   // rules. Read the stylesheet directly to guard against a badge being
-  // reintroduced for any status value.
-  const css = fs.readFileSync(path.join(__dirname, '../../style/jobtable.css'), 'utf8');
+  // reintroduced for any status value. Done in beforeAll so the I/O happens
+  // only when this suite runs, not during test collection.
+  let css: string;
+  beforeAll(() => {
+    css = fs.readFileSync(path.join(__dirname, '../../style/jobtable.css'), 'utf8');
+  });
   const statusClasses = ['running', 'completed', 'failed', 'pending', 'skipped', 'unknown'];
 
   it('does not style any status value as a badge', () => {
