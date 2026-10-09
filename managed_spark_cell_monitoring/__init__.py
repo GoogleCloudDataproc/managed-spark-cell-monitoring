@@ -73,28 +73,33 @@ def set_enabled(enabled):
   """
   global _enabled
   enabled = bool(enabled)
+  listeners_to_call = []
   with _enabled_lock:
     changed = enabled != _enabled
     _enabled = enabled
-  if changed and not enabled:
-    for listener in list(_disable_listeners):
-      try:
-        listener()
-      except Exception:  # pylint: disable=broad-exception-caught
-        logger.debug("Error while disabling cell monitoring", exc_info=True)
+    if changed and not enabled:
+      listeners_to_call = list(_disable_listeners)
+  # Invoke outside the lock so a listener may itself call into this module.
+  for listener in listeners_to_call:
+    try:
+      listener()
+    except Exception:  # pylint: disable=broad-exception-caught
+      logger.debug("Error while disabling cell monitoring", exc_info=True)
   return enabled
 
 
 def add_disable_listener(callback):
   """Registers a callable invoked whenever monitoring is switched off."""
-  if callback not in _disable_listeners:
-    _disable_listeners.append(callback)
+  with _enabled_lock:
+    if callback not in _disable_listeners:
+      _disable_listeners.append(callback)
 
 
 def remove_disable_listener(callback):
   """Unregisters a callable added with `add_disable_listener`."""
-  if callback in _disable_listeners:
-    _disable_listeners.remove(callback)
+  with _enabled_lock:
+    if callback in _disable_listeners:
+      _disable_listeners.remove(callback)
 
 
 def get_jar_path(spark_version: str = "3") -> str:

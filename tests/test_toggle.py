@@ -209,3 +209,91 @@ def test_magic_registration_failure_is_non_fatal():
   mock_ipython = mock.MagicMock()
   mock_ipython.register_magic_function.side_effect = RuntimeError("no magics here")
   kernelextension._register_cellmonitor_magic(mock_ipython)  # must not raise
+
+
+# --- Concurrency: the toggle vs. the socket thread ------------------------
+
+
+def test_disable_listener_may_call_back_into_the_module():
+  """Listeners run outside _enabled_lock, so re-entrancy cannot deadlock."""
+  seen = []
+
+  def listener():
+    seen.append(cell_monitoring.is_enabled())
+    cell_monitoring.remove_disable_listener(listener)
+
+  cell_monitoring.add_disable_listener(listener)
+  cell_monitoring.set_enabled(False)
+  assert seen == [False]
+  assert listener not in cell_monitoring._disable_listeners
+
+
+def test_listener_added_during_disable_is_not_called_for_that_transition():
+  late = mock.MagicMock()
+
+  def listener():
+    cell_monitoring.add_disable_listener(late)
+
+  cell_monitoring.add_disable_listener(listener)
+  cell_monitoring.set_enabled(False)
+  late.assert_not_called()  # snapshot was taken under the lock
+  cell_monitoring.set_enabled(True)
+  cell_monitoring.set_enabled(False)
+  late.assert_called_once()
+
+
+def test_send_to_frontend_survives_widgets_vanishing_mid_route(extension):
+  """close_all_widgets() racing an incoming event must not raise or log."""
+  widget = mock.MagicMock(active_jobs_count=1, run_id="run-1")
+  extension.active_widgets["run-1"] = widget
+  extension.job_to_run_id[7] = "run-1"
+
+  # Emulate the kernel thread clearing everything right after routing picked
+  # the widget: the job-end path then sees empty dicts.
+  original = extension._handle_job_end
+
+  def racing_job_end(w, msg):
+    extension.close_all_widgets()
+    original(w, msg)
+
+  with mock.patch.object(extension, "_handle_job_end", racing_job_end), mock.patch.object(
+      kernelextension.logger, "warning"
+  ) as warn:
+    extension.send_to_frontend({"msgtype": "sparkJobEnd", "jobId": 7})
+
+  warn.assert_not_called()
+  assert not extension.active_widgets
+  assert not extension.job_to_run_id
+
+
+def test_resolve_widget_and_fallback_tolerate_empty_tracking(extension):
+  extension.run_id = "run-1"
+  assert extension._resolve_widget("missing") is None
+  assert extension._any_active_widget() is None
+  with mock.patch.object(kernelextension.logger, "warning") as warn:
+    extension.send_to_frontend({"msgtype": "sparkStageSubmitted", "jobIds": [1]})
+  warn.assert_not_called()
+
+
+def test_post_run_cell_hook_tolerates_widget_removed_by_socket_thread(extension):
+  """If _handle_job_end wins the race, post_run must not clean up twice."""
+
+  class VanishingDict(dict):
+    """pop() finds the entry already gone, as if another thread removed it."""
+
+    def pop(self, key, default=None):
+      self.clear()
+      return default
+
+  widget = mock.MagicMock(active_jobs_count=0)
+  extension.active_widgets = VanishingDict({"run-1": widget})
+
+  extension.post_run_cell_hook(None)
+
+  assert widget.cell_finished is True
+  widget.cleanup.assert_not_called()  # the other thread owns the cleanup
+  assert not extension.active_widgets
+
+  # Nothing tracked at all: a plain no-op.
+  extension.post_run_cell_hook(None)
+  widget.cleanup.assert_not_called()

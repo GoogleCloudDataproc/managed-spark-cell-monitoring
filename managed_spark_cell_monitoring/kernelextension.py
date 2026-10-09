@@ -262,13 +262,27 @@ class CellMonitorExtension:
     for widget in widgets:
       widget.spark_ui_url = new_url
 
+  # Threading note: send_to_frontend runs on the socket thread while the
+  # IPython hooks and close_all_widgets run on the kernel thread. The shared
+  # dicts are only ever touched through single, GIL-atomic operations
+  # (get / pop(key, None) / next(iter(...), None) / item assignment), never
+  # check-then-act, so a widget disappearing between two statements cannot
+  # raise StopIteration or KeyError. Taking _env_lock here instead is not an
+  # option: _handle_job_start -> _update_app_id already acquires it.
+
+  def _any_active_widget(self):
+    """Returns some live widget, or None; safe against concurrent removal."""
+    return next(iter(self.active_widgets.values()), None)
+
   def _resolve_widget(self, target_id):
     """Finds the correct widget instance for a given session/job."""
     widget = self.active_widgets.get(target_id)
-    if not widget and self.run_id:
-      widget = self.active_widgets.get(self.run_id)
-    if not widget and self.active_widgets:
-      widget = next(iter(self.active_widgets.values()))
+    if not widget:
+      run_id = self.run_id
+      if run_id:
+        widget = self.active_widgets.get(run_id)
+    if not widget:
+      widget = self._any_active_widget()
     return widget
 
   def _get_target_run_id(self, spark_msg, msgtype):
@@ -300,15 +314,12 @@ class CellMonitorExtension:
     # this cell have completed, it is safe to remove the widget from
     # active tracking.
     if widget.active_jobs_count <= 0 and getattr(widget, 'cell_finished', False):
-      if widget.run_id in self.active_widgets:
+      if self.active_widgets.pop(widget.run_id, None) is not None:
         widget.cleanup()
-        del self.active_widgets[widget.run_id]
 
     # Memory Cleanup: the job is finished, so we no longer need to track
     # its routing.
-    job_id = spark_msg.get('jobId')
-    if job_id in self.job_to_run_id:
-      del self.job_to_run_id[job_id]
+    self.job_to_run_id.pop(spark_msg.get('jobId'), None)
 
   def _handle_generic_event(self, widget, spark_msg):
     widget.append_event(spark_msg, self.sequence_counter)
@@ -358,15 +369,14 @@ class CellMonitorExtension:
               spark_msg.get('jobId')
           )
           return
-        elif self.active_widgets:
-          # Fallback: if we can't map the event to a specific job, send it to
-          # the most recent active widget.
-          logger.debug('Message routed to fallback primary widget: %s', msgtype)
-          widget = next(iter(self.active_widgets.values()))
-        else:
+        # Fallback: if we can't map the event to a specific job, send it to
+        # the most recent active widget.
+        widget = self._any_active_widget()
+        if widget is None:
           # Log when we completely drop an event because no widgets exist
           logger.debug('Dropped spark event (no active widgets found): %s', msgtype)
           return
+        logger.debug('Message routed to fallback primary widget: %s', msgtype)
 
       # Route messages based on Job ID mappings
       if msgtype == 'sparkJobStart':
@@ -448,12 +458,15 @@ class CellMonitorExtension:
       if getattr(result.info, 'silent', False) or not getattr(result.info, 'store_history', True):
         return
 
-    if self.run_id in self.active_widgets:
-      widget = self.active_widgets[self.run_id]
-      widget.cell_finished = True
-      if widget.active_jobs_count <= 0:
+    widget = self.active_widgets.get(self.run_id)
+    if widget is None:
+      return
+    widget.cell_finished = True
+    if widget.active_jobs_count <= 0:
+      # pop() rather than del: _handle_job_end on the socket thread may have
+      # removed it already.
+      if self.active_widgets.pop(self.run_id, None) is not None:
         widget.cleanup()
-        del self.active_widgets[self.run_id]
 
 
 class SocketThread(threading.Thread):
