@@ -73,24 +73,6 @@ spark = (
 )
 ```
 
-### 4. Turning monitoring on or off
-
-Monitoring is on by default. It can be switched off for a kernel without unloading the extension, which is useful for hosts that expose an "in-cell monitoring" setting or for notebooks where the monitor is not wanted:
-
-```python
-%cellmonitor off      # also: on | status
-```
-
-or, from code (for example a host sending a silent execution):
-
-```python
-import managed_spark_cell_monitoring
-managed_spark_cell_monitoring.set_enabled(False)   # returns the new state
-managed_spark_cell_monitoring.is_enabled()
-```
-
-While off, any monitors currently displayed are removed, new cells show nothing, and listener events are dropped at the kernel so no widget traffic is produced. Switching back on takes effect from the next cell. To start a kernel with monitoring off, set `MANAGED_SPARK_CELL_MONITORING_ENABLED=0` (also accepts `false`, `no`, `off`) in the kernel's environment; any other value, or an unset variable, means on.
-
 ---
 
 ## Development & Building
