@@ -39,6 +39,22 @@ export class TaskChartStore {
     this.numActiveTasks = 0;
   }
 
+  /**
+   * Ensures the active-task line ends at zero once nothing is running any
+   * more. A lost stage-completion event can leave the last plotted point above
+   * zero; this draws the missing drop at `time` (never earlier than the last
+   * plotted point, so the series stays monotonic).
+   */
+  closeOut(time: number) {
+    const last = this.taskDataY.length - 1;
+    if (last < 0 || this.taskDataY[last] === 0) {
+      return;
+    }
+    const lastTime = this.taskDataX[last];
+    const t = new Date(time).getTime();
+    this.addTaskData(Number.isFinite(t) ? Math.max(t, lastTime) : lastTime, 0);
+  }
+
   addExecutorData(time: number, numCores: number) {
     this.executorDataX.push(time);
     this.executorDataY.push(numCores);
