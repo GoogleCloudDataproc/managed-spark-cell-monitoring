@@ -315,7 +315,7 @@ class CellMonitorExtension:
     # active tracking.
     if widget.active_jobs_count <= 0 and getattr(widget, 'cell_finished', False):
       if self.active_widgets.pop(widget.run_id, None) is not None:
-        widget.cleanup()
+        self._finish_widget(widget)
 
     # Memory Cleanup: the job is finished, so we no longer need to track
     # its routing.
@@ -466,7 +466,21 @@ class CellMonitorExtension:
       # pop() rather than del: _handle_job_end on the socket thread may have
       # removed it already.
       if self.active_widgets.pop(self.run_id, None) is not None:
-        widget.cleanup()
+        self._finish_widget(widget)
+
+  def _finish_widget(self, widget):
+    """Closes out a widget whose cell has ended and whose jobs have all ended.
+
+    This is the one moment the kernel knows the cell's final state is
+    complete, so it pushes that state to the frontend before releasing the
+    widget. Both the cell-end path and the job-end path funnel through here;
+    whichever happens last performs the hand-off.
+    """
+    try:
+      widget.send_final_state()
+    except Exception:  # pylint: disable=broad-exception-caught
+      logger.debug('Failed to send final state', exc_info=True)
+    widget.cleanup()
 
 
 class SocketThread(threading.Thread):

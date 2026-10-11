@@ -106,6 +106,30 @@ export class NotebookStore {
     this.deleteCellData(cellId);
   }
 
+  /**
+   * Called after the kernel's `final_state` batch for `cellId` has been
+   * applied. The batch itself closes jobs and stages through the regular
+   * handlers; this only tidies the task chart so its line ends at zero when
+   * the cell has nothing running any more. Jobs the kernel did not report as
+   * ended are left untouched on purpose: the kernel is the source of truth.
+   */
+  finalizeCell(cellId: string) {
+    const cell = this.cells[cellId];
+    if (!cell || cell.numActiveJobs > 0) {
+      return;
+    }
+    let latestEnd = Number.NEGATIVE_INFINITY;
+    cell.uniqueJobIds.forEach((uniqueJobId) => {
+      const end = this.jobs[uniqueJobId]?.endTime?.getTime();
+      if (typeof end === 'number' && Number.isFinite(end)) {
+        latestEnd = Math.max(latestEnd, end);
+      }
+    });
+    cell.taskChartStore.closeOut(
+      Number.isFinite(latestEnd) ? latestEnd : Date.now()
+    );
+  }
+
   onCellExecutedAgain(cellId: string) {
     this.deleteCellData(cellId);
     this.cells[cellId] = new Cell(cellId, this);

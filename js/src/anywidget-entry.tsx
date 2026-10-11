@@ -66,6 +66,33 @@ function routeSparkMessageToStore(
   }
 }
 
+/**
+ * Applies a kernel `final_state` batch (or one chunk of it): retained
+ * job-start, job-end and stage-completed events of the cell, in sequence
+ * order. Events already seen
+ * are no-ops in the store; events that were lost in transit finalize the
+ * corresponding job/stage. Routing goes through the normal handlers so the
+ * header, table and task chart all update the same way a live event would.
+ */
+export function applyFinalState(
+  events: Array<{sequence?: number; data?: any}>,
+  notebookStore: NotebookStore,
+  cellId: string,
+  finalize = true,
+) {
+  const ordered = [...events]
+    .filter((e) => e && e.data && e.data.msgtype)
+    .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
+  for (const event of ordered) {
+    routeSparkMessageToStore(event.data, notebookStore, cellId);
+  }
+  // The kernel may split a large batch into several size-bounded messages;
+  // the chart close-out only makes sense once the last one has been applied.
+  if (finalize) {
+    notebookStore.finalizeCell(cellId);
+  }
+}
+
 export default {
   initialize({model}: {model: any}) {
     const runId = model.get('run_id');
@@ -122,6 +149,20 @@ export default {
       } else if (msg.type === 'replay_events' && Array.isArray(msg.events)) {
         runInAction(() => {
           sequencer.handleReplayEvents(msg.events);
+        });
+      } else if (msg.type === 'final_state' && Array.isArray(msg.events)) {
+        // The kernel's authoritative end state for this cell (job start/end
+        // and stage completion events), sent once the cell has finished and
+        // no job of the cell is running any more. It deliberately bypasses
+        // the sequencer: these events are not a contiguous stream, and the
+        // store handlers are idempotent, so applying them directly closes out
+        // anything a transport gap left behind as RUNNING.
+        const isLastChunk =
+          typeof msg.total_chunks !== 'number' ||
+          typeof msg.chunk !== 'number' ||
+          msg.chunk >= msg.total_chunks - 1;
+        runInAction(() => {
+          applyFinalState(msg.events, notebookStore, cellId, isLastChunk);
         });
       }
     };
