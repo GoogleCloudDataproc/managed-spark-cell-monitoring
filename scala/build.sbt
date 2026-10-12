@@ -24,7 +24,34 @@ lazy val sharedShadeRules = Seq(
 // put a second scala-library on the driver classpath.
 lazy val assemblySettings = Seq(
   assembly / assemblyShadeRules := sharedShadeRules,
-  assembly / assemblyOption ~= { _.withIncludeScala(false) }
+  assembly / assemblyOption ~= { _.withIncludeScala(false) },
+  // Guard against new transitive dependencies slipping in unshaded: fail the
+  // build if the assembly contains any class outside our own package, naming
+  // the packages that need a ShadeRule above.
+  assembly := {
+    val jar = assembly.value
+    val allowedPrefix = "managed_spark_cell_monitoring/"
+    val zip = new java.util.zip.ZipFile(jar)
+    val foreign =
+      try {
+        import scala.collection.JavaConverters._
+        zip.entries.asScala.map(_.getName).filter { name =>
+          name.endsWith(".class") &&
+            !name.startsWith(allowedPrefix) &&
+            !name.startsWith("META-INF/")
+        }.toList
+      } finally zip.close()
+    if (foreign.nonEmpty) {
+      val packages = foreign
+        .map(_.split('/').dropRight(1).take(3).mkString("."))
+        .distinct.sorted
+      sys.error(
+        s"${jar.getName} contains ${foreign.size} class(es) outside " +
+          s"$allowedPrefix (unshaded dependency?). Add a ShadeRule for: " +
+          packages.mkString(", "))
+    }
+    jar
+  }
 )
 
 lazy val commonSettings = Seq(
