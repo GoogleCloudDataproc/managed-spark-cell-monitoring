@@ -125,9 +125,9 @@ export class NotebookStore {
         latestEnd = Math.max(latestEnd, end);
       }
     });
-    cell.taskChartStore.closeOut(
-      Number.isFinite(latestEnd) ? latestEnd : Date.now()
-    );
+    // closeOut() falls back to the last plotted point when latestEnd is not
+    // finite (no job with an end time), so no wall-clock fallback is needed.
+    cell.taskChartStore.closeOut(latestEnd);
   }
 
   onCellExecutedAgain(cellId: string) {
