@@ -514,6 +514,10 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
   /** Called when scheduled stage tasks update was requested */
   def onStageStatusActive(): Unit = synchronized {
     if (paused) return
+    // Sample time on the driver clock, the same clock that stamps job/stage
+    // submission and completion times, so the frontend never has to fall back
+    // to its own (skewed, delayed) wall clock for the task chart.
+    val sampleTime = System.currentTimeMillis()
     // 1. Update on status of active stages
     for ((stageId, stageInfo) <- activeStages) {
       val stageData = stageIdToData.getOrElseUpdate(
@@ -535,6 +539,7 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
 
         val json = ("msgtype" -> "sparkStageActive") ~
           ("stageId" -> stageInfo.stageId) ~
+          ("time" -> sampleTime) ~
           ("numActiveTasks" -> currentActive) ~
           ("numFailedTasks" -> currentFailed) ~
           ("numCompletedTasks" -> currentCompleted) ~

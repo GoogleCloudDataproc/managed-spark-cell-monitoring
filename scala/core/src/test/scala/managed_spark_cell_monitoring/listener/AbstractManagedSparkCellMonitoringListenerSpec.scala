@@ -409,6 +409,12 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
       received should include ("numActiveTasks")
       received should include ("numCompletedTasks")
       received should include ("numFailedTasks")
+      // Sampled on the driver clock so the task chart shares one timeline.
+      val timePattern = "\"time\":(\\d+)".r
+      val sampleTime = timePattern.findFirstMatchIn(received).map(_.group(1).toLong)
+      sampleTime should not be empty
+      sampleTime.get should be <= System.currentTimeMillis()
+      sampleTime.get should be > (System.currentTimeMillis() - 60000L)
       received shouldNot include ("stageAttemptId")
       received shouldNot include ("parentIds")
       received shouldNot include ("\"name\"")
