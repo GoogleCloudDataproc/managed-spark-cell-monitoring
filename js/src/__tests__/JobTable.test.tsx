@@ -139,6 +139,37 @@ describe('JobTable Component', () => {
     expect(container.querySelector('.tdjobduration')).toHaveTextContent('mock-time:0');
   });
 
+  it('renders the full job name in a clipped span with a tooltip', () => {
+    const longName = 'collect at /home/jupyter/notebooks/wine_quality_analysis_pipeline.py:142';
+    const { container, job } = renderTable();
+    act(() => {
+      runInAction(() => {
+        job.name = longName;
+      });
+    });
+    const nameCell = container.querySelector('.tdjobname') as HTMLElement;
+    const clip = nameCell.querySelector('.jobname') as HTMLElement;
+    // Truncation is purely CSS (max-width + ellipsis); the DOM keeps the full
+    // text so copy/paste and the tooltip both show the whole call site.
+    expect(clip).toHaveTextContent(longName);
+    expect(clip).toHaveAttribute('title', longName);
+    expect(nameCell.children).toHaveLength(1);
+    // The wrapper is the container the cqw-based cap is measured against.
+    expect(container.querySelector('.tabcontent')).toHaveClass('jobtable-content');
+  });
+
+  it('falls back to "Unnamed" when the job has no name', () => {
+    const { container, job } = renderTable();
+    act(() => {
+      runInAction(() => {
+        job.name = '';
+      });
+    });
+    const clip = container.querySelector('.tdjobname .jobname') as HTMLElement;
+    expect(clip).toHaveTextContent('Unnamed');
+    expect(clip).toHaveAttribute('title', 'Unnamed');
+  });
+
   it('applies a stable lowercase status class', () => {
     const { container, job } = renderTable();
     const status = () => container.querySelector('.tditemjobstatus') as HTMLElement;
@@ -209,6 +240,58 @@ describe('job status stylesheet', () => {
   it('does not give the status span a background, colour, radius or padding', () => {
     expect(css).not.toMatch(/\.tditemjobstatus\b/);
     expect(css).not.toMatch(/\.tdjobstatus\s*>\s*span/);
+  });
+});
+
+describe('job table column sizing stylesheet', () => {
+  let css: string;
+  beforeAll(() => {
+    css = fs
+      .readFileSync(path.join(__dirname, '../../style/jobtable.css'), 'utf8')
+      // Drop comments so a class name mentioned in prose is never mistaken
+      // for a selector.
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+  });
+  // Returns the declarations of every rule whose selector list mentions `cls`.
+  const rulesFor = (cls: string) =>
+    Array.from(css.matchAll(/([^{}]+)\{([^}]*)\}/g))
+      .filter((m) => new RegExp(`\\.${cls}\\b`).test(m[1]))
+      .map((m) => m[2]);
+
+  it('gives the Job Name column a floor so short names stay visibly centred', () => {
+    expect(rulesFor('thjobname').join(' ')).toMatch(/width\s*:\s*18%/);
+  });
+
+  it('keeps the job name on one line, capped relative to the widget width', () => {
+    const decl = rulesFor('jobname').join(' ');
+    expect(decl).toMatch(/min-width\s*:/);
+    // The cap must track the wrapper (container-query units), not a fixed ch/px.
+    expect(decl).toMatch(/max-width\s*:[^;]*cqw/);
+    expect(decl).toMatch(/white-space\s*:\s*nowrap/);
+    expect(decl).toMatch(/text-overflow\s*:\s*ellipsis/);
+  });
+
+  it('makes only the job table wrapper a size container', () => {
+    expect(rulesFor('jobtable-content').join(' ')).toMatch(/container-type\s*:\s*inline-size/);
+    expect(rulesFor('tabcontent').join(' ')).not.toMatch(/container-type/);
+  });
+
+  it('gives Start Time, Status and Duration fixed percentage shares', () => {
+    for (const cls of ['thjobstart', 'thjobstatus', 'thjobtime']) {
+      expect(rulesFor(cls).join(' ')).toMatch(/(^|[^-])width\s*:\s*\d+%/);
+    }
+  });
+
+  it('lets Tasks absorb the slack while keeping room for the progress bar', () => {
+    const decl = rulesFor('thjobtasks').join(' ');
+    expect(decl).not.toMatch(/(^|[^-])width\s*:/);
+    expect(decl).toMatch(/min-width\s*:/);
+  });
+
+  it('keeps every column centred', () => {
+    for (const cls of ['thjobname', 'tdjobname', 'jobname']) {
+      expect(rulesFor(cls).join(' ')).not.toMatch(/text-align\s*:\s*left/);
+    }
   });
 });
 

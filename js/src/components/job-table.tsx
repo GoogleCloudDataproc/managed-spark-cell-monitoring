@@ -72,17 +72,22 @@ const JobItem = observer((props: { jobId: string }) => {
     isValidTimestamp(job.endTime) && isValidTimestamp(job.startTime)
       ? Math.max(0, job.endTime.getTime() - job.startTime.getTime())
       : NaN;
+  const jobName = job.name || 'Unnamed';
   return (
     <tr className="jobrow">
-      <td className="tdjobname">{job.name ? job.name : 'Unnamed'}</td>
+      <td className="tdjobname">
+        {/* Inner span keeps the name on one line; the title exposes the full name. */}
+        <span className="jobname" title={jobName}>
+          {jobName}
+        </span>
+      </td>
       <td className="tdjobstarttime" title={formatStartTimestamp(job.startTime)}>
         {formatStartTime(job.startTime)}
       </td>
       <td className="tdjobstatus">
         <span className={'tditemjobstatus ' + String(job.status).toLowerCase()}>
           {job.status
-            ? String(job.status).charAt(0).toUpperCase() +
-              String(job.status).slice(1).toLowerCase()
+            ? String(job.status).charAt(0).toUpperCase() + String(job.status).slice(1).toLowerCase()
             : 'Unknown'}
         </span>
       </td>
@@ -105,7 +110,7 @@ export const JobTable = observer(() => {
 
   return (
     <ErrorBoundary>
-      <div className="tabcontent">
+      <div className="tabcontent jobtable-content">
         <table className="jobtable">
           <thead>
             <tr>
