@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import select
 import socket
 import threading
 import urllib.parse
@@ -54,6 +55,16 @@ _SPARK_DEFAULTS_PATH = '/etc/spark/conf/spark-defaults.conf'
 _SAFE_APP_ID_RE = re.compile(r'^[A-Za-z0-9_.-]+$')
 _YARN_APP_ID_RE = re.compile(r'^application_\d+_\d+$')
 
+# Wire framing shared with the Spark listener. Events flow driver -> kernel;
+# the kernel answers on the same socket with control frames that pause or
+# resume the driver when in-cell monitoring is toggled:
+#   {"msgtype": "control", "enabled": false};EOD:
+_FRAME_DELIMITER = b';EOD:'
+_CONTROL_SEND_TIMEOUT_SECONDS = 1.0
+# While monitoring is off the reader only keeps the unterminated tail of the
+# stream; anything larger than this is a malformed stream and is discarded.
+_MAX_IDLE_BUFFER_BYTES = 4 * 1024 * 1024
+
 
 class CellMonitorExtension:
   """Manages the TCP socket, routing state, and IPython cell hooks."""
@@ -64,6 +75,12 @@ class CellMonitorExtension:
     self.server = None
     self.socket_thread = None
     self.env_thread = None
+
+    # Connected Spark drivers (one socket each). Guarded by _clients_lock,
+    # which also serialises writes of control frames so a driver that
+    # connects during a toggle gets exactly one, current, state.
+    self._clients = []
+    self._clients_lock = threading.Lock()
 
     # State tracking
     self.run_id = None
@@ -324,8 +341,13 @@ class CellMonitorExtension:
   def _handle_generic_event(self, widget, spark_msg):
     widget.append_event(spark_msg, self.sequence_counter)
 
-  def close_all_widgets(self):
-    """Removes every live monitor; used when monitoring is switched off."""
+  def freeze_all_widgets(self):
+    """Stops tracking every live monitor; used when monitoring is switched off.
+
+    Rendered panels are left on screen exactly as they are (the frontend
+    keeps its own state); only the kernel-side history and routing are
+    released, so nothing accumulates while monitoring is off.
+    """
     with self._env_lock:
       widgets = list(self.active_widgets.values())
       self.active_widgets.clear()
@@ -333,15 +355,65 @@ class CellMonitorExtension:
       self.run_id = None
     for widget in widgets:
       try:
+        widget.cell_finished = True
         widget.cleanup(clear_history=True)
-        widget.close()
       except Exception:  # pylint: disable=broad-exception-caught
-        logger.debug('Error closing cell monitor widget', exc_info=True)
+        logger.debug('Error freezing cell monitor widget', exc_info=True)
+
+  # --- Driver control channel ---------------------------------------------
+
+  @staticmethod
+  def _control_frame(enabled):
+    payload = json.dumps({'msgtype': 'control', 'enabled': bool(enabled)})
+    return payload.encode('utf-8') + _FRAME_DELIMITER
+
+  @staticmethod
+  def _send_control_frame(client, enabled):
+    """Writes one control frame; never blocks the kernel thread for long."""
+    frame = CellMonitorExtension._control_frame(enabled)
+    try:
+      _, writable, _ = select.select([], [client], [], _CONTROL_SEND_TIMEOUT_SECONDS)
+      if not writable:
+        logger.debug('Driver socket not writable; control frame skipped')
+        return False
+      client.sendall(frame)
+      return True
+    except Exception:  # pylint: disable=broad-exception-caught
+      logger.debug('Failed to send control frame to driver', exc_info=True)
+      return False
+
+  def register_client(self, client):
+    """Tracks a newly connected driver and tells it the current state."""
+    with self._clients_lock:
+      self._clients.append(client)
+      self._send_control_frame(client, cell_monitoring.is_enabled())
+
+  def unregister_client(self, client):
+    with self._clients_lock:
+      if client in self._clients:
+        self._clients.remove(client)
+
+  def connected_driver_count(self):
+    with self._clients_lock:
+      return len(self._clients)
+
+  def broadcast_control(self, enabled):
+    """Pauses or resumes every connected driver."""
+    with self._clients_lock:
+      for client in list(self._clients):
+        self._send_control_frame(client, enabled)
+
+  def on_monitoring_state_changed(self, enabled):
+    """State listener: freeze widgets on off, and relay the state to drivers."""
+    if not enabled:
+      self.freeze_all_widgets()
+    self.broadcast_control(enabled)
 
   def send_to_frontend(self, msg):
     """Routes a message to the appropriate frontend widget."""
     if not cell_monitoring.is_enabled():
-      # Keep draining the listener socket, but nothing reaches the frontend.
+      # Last line of defence for a frame already past the reader when the
+      # switch flipped; the reader itself drops frames while disabled.
       return
     # Strict Formatting Check: Must be a dict and must possess a msgtype.
     if not isinstance(msg, dict):
@@ -485,6 +557,7 @@ class SocketThread(threading.Thread):
       try:
         self.server.settimeout(5)
         client, _ = self.server.accept()
+        self.extension_context.register_client(client)
         reader = SocketReader(client, self.extension_context)
         reader.start()
       except socket.timeout:
@@ -512,8 +585,17 @@ class SocketReader(threading.Thread):
         if not data:
           break
         buffer += data
-        while b';EOD:' in buffer:
-          line, buffer = buffer.split(b';EOD:', 1)
+        if not cell_monitoring.is_enabled():
+          # Monitoring is off: keep draining so the driver never blocks, but
+          # do no work above the socket. Only the unterminated tail survives
+          # so framing is intact when monitoring is switched back on.
+          if _FRAME_DELIMITER in buffer:
+            buffer = buffer.rsplit(_FRAME_DELIMITER, 1)[-1]
+          if len(buffer) > _MAX_IDLE_BUFFER_BYTES:
+            buffer = b''
+          continue
+        while _FRAME_DELIMITER in buffer:
+          line, buffer = buffer.split(_FRAME_DELIMITER, 1)
           if line:
             try:
               msg = json.loads(line.decode('utf-8'))
@@ -523,6 +605,10 @@ class SocketReader(threading.Thread):
       except Exception as e:  # pylint: disable=broad-exception-caught
         logger.debug('Socket read loop terminated: %s', e)
         break
+    try:
+      self.extension_context.unregister_client(self.client)
+    except Exception:  # pylint: disable=broad-exception-caught
+      pass
     self.client.close()
 
 
@@ -584,10 +670,13 @@ def load_ipython_extension(ipython):
   # Encapsulate all state within a context object. The socket server is
   # started even when monitoring is currently off: the Spark driver reads the
   # port from the environment once at start-up, so it must always exist for a
-  # later `set_enabled(True)` to work.
+  # later `set_enabled(True)` to work. A driver that connects while monitoring
+  # is off is told so on connect and stays paused until it is switched on.
   extension_context = CellMonitorExtension(ipython)
   extension_context.start_server()
-  cell_monitoring.add_disable_listener(extension_context.close_all_widgets)
+  cell_monitoring.add_state_listener(
+      extension_context.on_monitoring_state_changed
+  )
   _register_cellmonitor_magic(ipython)
 
   if spark_imported:

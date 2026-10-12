@@ -13,6 +13,7 @@
 # limitations under the License.
 """Tests for the runtime on/off switch (`set_enabled` / `%cellmonitor`)."""
 
+import json
 from unittest import mock
 
 import pytest
@@ -25,11 +26,15 @@ from managed_spark_cell_monitoring import kernelextension
 def isolated_toggle_state():
   """Each test starts enabled with no listeners and leaves it that way."""
   saved = list(cell_monitoring._disable_listeners)
+  saved_state = list(cell_monitoring._state_listeners)
   cell_monitoring._disable_listeners.clear()
+  cell_monitoring._state_listeners.clear()
   cell_monitoring.set_enabled(True)
   yield
   cell_monitoring._disable_listeners.clear()
   cell_monitoring._disable_listeners.extend(saved)
+  cell_monitoring._state_listeners.clear()
+  cell_monitoring._state_listeners.extend(saved_state)
   cell_monitoring.set_enabled(True)
 
 
@@ -135,31 +140,171 @@ def test_send_to_frontend_drops_events_when_disabled(extension):
   assert 7 not in extension.job_to_run_id
 
 
-def test_close_all_widgets_closes_and_forgets_everything(extension):
+def test_freeze_all_widgets_keeps_panels_but_forgets_everything(extension):
   w1, w2 = mock.MagicMock(), mock.MagicMock()
-  w2.close.side_effect = RuntimeError("already closed")
+  w2.cleanup.side_effect = RuntimeError("boom")
   extension.active_widgets.update({"run-1": w1, "run-2": w2})
   extension.job_to_run_id[1] = "run-1"
 
-  extension.close_all_widgets()
+  extension.freeze_all_widgets()
 
+  # Rendered panels stay on screen: history is released, nothing is closed.
   w1.cleanup.assert_called_once_with(clear_history=True)
-  w1.close.assert_called_once()
-  w2.close.assert_called_once()  # error swallowed
+  assert w1.cell_finished is True
+  w1.close.assert_not_called()
+  w2.close.assert_not_called()  # error swallowed
   assert not extension.active_widgets
   assert not extension.job_to_run_id
   assert extension.run_id is None
 
 
-def test_set_enabled_false_tears_down_live_widgets_via_extension(extension):
+def test_set_enabled_false_freezes_live_widgets_via_extension(extension):
   widget = mock.MagicMock()
   extension.active_widgets["run-1"] = widget
-  cell_monitoring.add_disable_listener(extension.close_all_widgets)
+  cell_monitoring.add_state_listener(extension.on_monitoring_state_changed)
 
   cell_monitoring.set_enabled(False)
 
-  widget.close.assert_called_once()
+  widget.cleanup.assert_called_once_with(clear_history=True)
+  widget.close.assert_not_called()
   assert not extension.active_widgets
+
+
+def test_state_listener_called_on_both_transitions():
+  seen = []
+  cell_monitoring.add_state_listener(seen.append)
+
+  cell_monitoring.set_enabled(False)
+  cell_monitoring.set_enabled(False)  # no change, no call
+  cell_monitoring.set_enabled(True)
+
+  assert seen == [False, True]
+  cell_monitoring.remove_state_listener(seen.append)
+  cell_monitoring.set_enabled(False)
+  assert seen == [False, True]
+
+
+# --- Driver control channel ------------------------------------------------
+
+
+def _socketpair():
+  import socket  # pylint: disable=g-import-not-at-top
+
+  a, b = socket.socketpair()
+  a.settimeout(2)
+  b.settimeout(2)
+  return a, b
+
+
+def test_register_client_sends_current_state_on_connect(extension):
+  kernel_side, driver_side = _socketpair()
+  try:
+    cell_monitoring.set_enabled(False)
+    extension.register_client(kernel_side)
+    assert extension.connected_driver_count() == 1
+    frame = driver_side.recv(1024)
+    assert frame.endswith(b";EOD:")
+    assert json.loads(frame[: -len(b";EOD:")]) == {
+        "msgtype": "control",
+        "enabled": False,
+    }
+  finally:
+    kernel_side.close()
+    driver_side.close()
+
+
+def test_toggle_broadcasts_control_frames_to_every_driver(extension):
+  k1, d1 = _socketpair()
+  k2, d2 = _socketpair()
+  try:
+    extension.register_client(k1)
+    extension.register_client(k2)
+    d1.recv(1024)  # initial state frames
+    d2.recv(1024)
+    cell_monitoring.add_state_listener(extension.on_monitoring_state_changed)
+
+    cell_monitoring.set_enabled(False)
+    cell_monitoring.set_enabled(True)
+
+    for d in (d1, d2):
+      data = b""
+      while data.count(b";EOD:") < 2:
+        data += d.recv(1024)
+      frames = [json.loads(f) for f in data.split(b";EOD:") if f]
+      assert [f["enabled"] for f in frames] == [False, True]
+  finally:
+    for sock in (k1, d1, k2, d2):
+      sock.close()
+
+
+def test_broadcast_tolerates_dead_driver_sockets(extension):
+  kernel_side, driver_side = _socketpair()
+  extension.register_client(kernel_side)
+  driver_side.recv(1024)
+  driver_side.close()
+  kernel_side.close()
+
+  extension.broadcast_control(False)  # must not raise
+  extension.unregister_client(kernel_side)
+  assert extension.connected_driver_count() == 0
+
+
+def _run_reader_with(extension, chunks):
+  """Feeds `chunks` through a SocketReader and returns the mock client."""
+  client = mock.MagicMock()
+  client.recv.side_effect = list(chunks) + [b""]
+  reader = kernelextension.SocketReader(client, extension)
+  reader.run()
+  return client
+
+
+def test_reader_drops_frames_without_parsing_while_disabled(extension):
+  cell_monitoring.set_enabled(False)
+  with mock.patch.object(extension, "send_to_frontend") as route, mock.patch(
+      "managed_spark_cell_monitoring.kernelextension.json.loads"
+  ) as loads:
+    client = _run_reader_with(
+        extension, [b'{"msgtype":"a"};EOD:{"msgtype":"b"};EOD:', b'{"msgtype":"c"};EOD:']
+    )
+
+  route.assert_not_called()
+  loads.assert_not_called()
+  client.close.assert_called_once()
+
+
+def test_reader_keeps_framing_across_re_enable(extension):
+  """A frame split across the flip must still be parsed once enabled."""
+  routed = []
+
+  original_recv = []
+
+  def recv(_size):
+    if not original_recv:
+      original_recv.append(1)
+      # First chunk arrives while disabled: a complete frame to drop plus
+      # the first half of the next one.
+      return b'{"msgtype":"dropped"};EOD:{"msgtype":"ke'
+    if len(original_recv) == 1:
+      original_recv.append(2)
+      cell_monitoring.set_enabled(True)
+      return b'pt"};EOD:'
+    return b""
+
+  cell_monitoring.set_enabled(False)
+  client = mock.MagicMock()
+  client.recv.side_effect = recv
+  with mock.patch.object(extension, "send_to_frontend", side_effect=routed.append):
+    kernelextension.SocketReader(client, extension).run()
+
+  assert routed == [{"msgtype": "kept"}]
+
+
+def test_reader_caps_idle_buffer_while_disabled(extension):
+  cell_monitoring.set_enabled(False)
+  huge = b"x" * (kernelextension._MAX_IDLE_BUFFER_BYTES + 10)
+  with mock.patch.object(extension, "send_to_frontend") as route:
+    _run_reader_with(extension, [huge, b'{"msgtype":"late"};EOD:'])
+  route.assert_not_called()
 
 
 def test_load_ipython_extension_registers_listener_and_magic():
@@ -173,9 +318,10 @@ def test_load_ipython_extension_registers_listener_and_magic():
     kernelextension.load_ipython_extension(mock_ipython)
 
   # The socket server starts regardless of the current state so the driver
-  # can always find the port, and the extension is torn down on disable.
+  # can always find the port; state changes are relayed to the drivers and
+  # freeze the widgets through the state listener.
   instance.start_server.assert_called_once()
-  assert instance.close_all_widgets in cell_monitoring._disable_listeners
+  assert instance.on_monitoring_state_changed in cell_monitoring._state_listeners
   mock_ipython.register_magic_function.assert_called_once()
   _, kwargs = mock_ipython.register_magic_function.call_args
   assert kwargs == {"magic_kind": "line", "magic_name": "cellmonitor"}
@@ -243,7 +389,7 @@ def test_listener_added_during_disable_is_not_called_for_that_transition():
 
 
 def test_send_to_frontend_survives_widgets_vanishing_mid_route(extension):
-  """close_all_widgets() racing an incoming event must not raise or log."""
+  """freeze_all_widgets() racing an incoming event must not raise or log."""
   widget = mock.MagicMock(active_jobs_count=1, run_id="run-1")
   extension.active_widgets["run-1"] = widget
   extension.job_to_run_id[7] = "run-1"
@@ -253,7 +399,7 @@ def test_send_to_frontend_survives_widgets_vanishing_mid_route(extension):
   original = extension._handle_job_end
 
   def racing_job_end(w, msg):
-    extension.close_all_widgets()
+    extension.freeze_all_widgets()
     original(w, msg)
 
   with mock.patch.object(extension, "_handle_job_end", racing_job_end), mock.patch.object(

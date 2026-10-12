@@ -51,6 +51,7 @@ def _enabled_from_env(environ=None):
 _enabled = _enabled_from_env()
 _enabled_lock = threading.Lock()
 _disable_listeners = []
+_state_listeners = []
 
 
 def is_enabled():
@@ -61,9 +62,11 @@ def is_enabled():
 def set_enabled(enabled):
   """Turns in-cell monitoring on or off for this kernel.
 
-  Switching off removes any monitors currently displayed and stops new cells
-  from showing one; switching back on takes effect from the next cell. The
-  listener connection itself is left alone so the toggle is reversible.
+  Switching off leaves monitors that are already rendered as they are, stops
+  new cells from showing one, and tells the Spark driver to pause event
+  production; switching back on takes effect from the next cell. The listener
+  connection itself is left alone so the toggle is reversible without a
+  restart.
 
   Args:
     enabled: True to monitor cells, False to run them without a monitor.
@@ -73,18 +76,26 @@ def set_enabled(enabled):
   """
   global _enabled
   enabled = bool(enabled)
-  listeners_to_call = []
+  disable_listeners_to_call = []
+  state_listeners_to_call = []
   with _enabled_lock:
     changed = enabled != _enabled
     _enabled = enabled
-    if changed and not enabled:
-      listeners_to_call = list(_disable_listeners)
+    if changed:
+      state_listeners_to_call = list(_state_listeners)
+      if not enabled:
+        disable_listeners_to_call = list(_disable_listeners)
   # Invoke outside the lock so a listener may itself call into this module.
-  for listener in listeners_to_call:
+  for listener in disable_listeners_to_call:
     try:
       listener()
     except Exception:  # pylint: disable=broad-exception-caught
       logger.debug("Error while disabling cell monitoring", exc_info=True)
+  for listener in state_listeners_to_call:
+    try:
+      listener(enabled)
+    except Exception:  # pylint: disable=broad-exception-caught
+      logger.debug("Error while changing cell monitoring state", exc_info=True)
   return enabled
 
 
@@ -100,6 +111,20 @@ def remove_disable_listener(callback):
   with _enabled_lock:
     if callback in _disable_listeners:
       _disable_listeners.remove(callback)
+
+
+def add_state_listener(callback):
+  """Registers `callback(enabled)` to be invoked on every state change."""
+  with _enabled_lock:
+    if callback not in _state_listeners:
+      _state_listeners.append(callback)
+
+
+def remove_state_listener(callback):
+  """Unregisters a callable added with `add_state_listener`."""
+  with _enabled_lock:
+    if callback in _state_listeners:
+      _state_listeners.remove(callback)
 
 
 def get_jar_path(spark_version: str = "3") -> str:
