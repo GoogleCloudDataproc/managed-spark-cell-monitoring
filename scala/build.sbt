@@ -14,7 +14,17 @@
 
 lazy val sharedShadeRules = Seq(
   ShadeRule.rename("org.json4s.**" -> "managed_spark_cell_monitoring.shaded.org.json4s.@1").inAll,
-  ShadeRule.rename("com.fasterxml.jackson.**" -> "managed_spark_cell_monitoring.shaded.com.fasterxml.jackson.@1").inAll
+  ShadeRule.rename("com.fasterxml.jackson.**" -> "managed_spark_cell_monitoring.shaded.com.fasterxml.jackson.@1").inAll,
+  // Pulled in transitively by jackson-module-scala; Spark ships its own copy.
+  ShadeRule.rename("com.thoughtworks.paranamer.**" -> "managed_spark_cell_monitoring.shaded.com.thoughtworks.paranamer.@1").inAll
+)
+
+// The listener runs inside the Spark driver, which always provides the Scala
+// standard library (same reason spark-core is "provided"). Bundling it would
+// put a second scala-library on the driver classpath.
+lazy val assemblySettings = Seq(
+  assembly / assemblyShadeRules := sharedShadeRules,
+  assembly / assemblyOption ~= { _.withIncludeScala(false) }
 )
 
 lazy val commonSettings = Seq(
@@ -35,7 +45,7 @@ lazy val spark3 = (project in file("spark-3"))
       "org.apache.spark" %% "spark-core" % "3.4.1" % "provided",
       "org.json4s" %% "json4s-jackson" % "3.7.0-M11"
     ),
-    assembly / assemblyShadeRules := sharedShadeRules
+    assemblySettings
   )
 
 lazy val spark4 = (project in file("spark-4"))
@@ -49,7 +59,7 @@ lazy val spark4 = (project in file("spark-4"))
       "org.apache.spark" %% "spark-core" % "4.0.0-preview1" % "provided",
       "org.json4s" %% "json4s-jackson" % "4.0.7"
     ),
-    assembly / assemblyShadeRules := sharedShadeRules
+    assemblySettings
   )
 
 lazy val root = (project in file("."))
