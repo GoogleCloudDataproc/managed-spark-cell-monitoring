@@ -15,14 +15,12 @@
  * limitations under the License.
  */
 
+import fs from 'fs';
+import path from 'path';
 import React from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { runInAction } from 'mobx';
-import {
-  JobTable,
-  formatStartTime,
-  formatStartTimestamp,
-} from '../components/job-table';
+import { JobTable, formatStartTime, formatStartTimestamp } from '../components/job-table';
 import { NotebookStore } from '../store/notebook';
 import { Cell } from '../store/cell';
 import { NotebookStoreContext, CellStoreContext } from '../store';
@@ -56,7 +54,7 @@ function renderTable(startTime = new Date(2025, 0, 1, 15, 36, 3)) {
       <CellStoreContext.Provider value={cellStore}>
         <JobTable />
       </CellStoreContext.Provider>
-    </NotebookStoreContext.Provider>
+    </NotebookStoreContext.Provider>,
   );
   return { notebookStore, cellStore, job, ...utils };
 }
@@ -64,9 +62,7 @@ function renderTable(startTime = new Date(2025, 0, 1, 15, 36, 3)) {
 describe('JobTable Component', () => {
   it('renders the columns in order: Job Name, Start Time, Status, Tasks, Duration', () => {
     const { container } = renderTable();
-    const headers = Array.from(container.querySelectorAll('thead th')).map(
-      (th) => th.textContent,
-    );
+    const headers = Array.from(container.querySelectorAll('thead th')).map((th) => th.textContent);
     expect(headers).toEqual(['Job Name', 'Start Time', 'Status', 'Tasks', 'Duration']);
   });
 
@@ -143,11 +139,11 @@ describe('JobTable Component', () => {
     expect(container.querySelector('.tdjobduration')).toHaveTextContent('mock-time:0');
   });
 
-  it('applies the lowercase status class so the badge styles match', () => {
+  it('applies a stable lowercase status class', () => {
     const { container, job } = renderTable();
-    const badge = () => container.querySelector('.tditemjobstatus') as HTMLElement;
-    expect(badge()).toHaveClass('running');
-    expect(badge()).not.toHaveClass('RUNNING');
+    const status = () => container.querySelector('.tditemjobstatus') as HTMLElement;
+    expect(status()).toHaveClass('running');
+    expect(status()).not.toHaveClass('RUNNING');
 
     act(() => {
       runInAction(() => {
@@ -155,8 +151,64 @@ describe('JobTable Component', () => {
         job.endTime = new Date(2025, 0, 1, 15, 36, 8);
       });
     });
-    expect(badge()).toHaveClass('failed');
-    expect(badge()).toHaveTextContent('Failed');
+    expect(status()).toHaveClass('failed');
+    expect(status()).toHaveTextContent('Failed');
+  });
+
+  it.each([
+    ['RUNNING', 'Running'],
+    ['COMPLETED', 'Completed'],
+    ['FAILED', 'Failed'],
+    ['PENDING', 'Pending'],
+    ['SKIPPED', 'Skipped'],
+    ['UNKNOWN', 'Unknown'],
+  ])('renders status %s as plain capitalised text %s with no inline styling', (raw, text) => {
+    const { container, job } = renderTable();
+    act(() => {
+      runInAction(() => {
+        // Cast: the table must cope with any status string the listener may send.
+        job.status = raw as SparkJob['status'];
+      });
+    });
+    const status = container.querySelector('.tditemjobstatus') as HTMLElement;
+    expect(status).toHaveTextContent(text);
+    expect(status).toHaveClass(raw.toLowerCase());
+    // No inline styling: appearance must come only from the table text.
+    expect(status.getAttribute('style')).toBeNull();
+  });
+
+  it('falls back to "Unknown" when the status is missing', () => {
+    const { container, job } = renderTable();
+    act(() => {
+      runInAction(() => {
+        job.status = undefined as unknown as SparkJob['status'];
+      });
+    });
+    expect(container.querySelector('.tditemjobstatus')).toHaveTextContent('Unknown');
+  });
+});
+
+describe('job status stylesheet', () => {
+  // Jest maps CSS imports to identity-obj-proxy, so jsdom never sees the real
+  // rules. Read the stylesheet directly to guard against a badge being
+  // reintroduced for any status value. Done in beforeAll so the I/O happens
+  // only when this suite runs, not during test collection.
+  let css: string;
+  beforeAll(() => {
+    css = fs.readFileSync(path.join(__dirname, '../../style/jobtable.css'), 'utf8');
+  });
+  const statusClasses = ['running', 'completed', 'failed', 'pending', 'skipped', 'unknown'];
+
+  it('does not style any status value as a badge', () => {
+    for (const cls of statusClasses) {
+      // Matches selectors such as ".pm .completed {" or ".completed," anywhere.
+      expect(css).not.toMatch(new RegExp(`\\.${cls}\\b`));
+    }
+  });
+
+  it('does not give the status span a background, colour, radius or padding', () => {
+    expect(css).not.toMatch(/\.tditemjobstatus\b/);
+    expect(css).not.toMatch(/\.tdjobstatus\s*>\s*span/);
   });
 });
 
