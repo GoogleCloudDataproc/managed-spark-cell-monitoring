@@ -15,12 +15,116 @@
 """Initialization for Managed Spark Cell Monitoring."""
 
 import importlib.metadata
+import logging
+import os
 import pathlib
+import threading
 
 try:
   __version__ = importlib.metadata.version("managed-spark-cell-monitoring")
 except importlib.metadata.PackageNotFoundError:
   __version__ = "unknown"
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Runtime on/off switch
+#
+# Hosts (e.g. an IDE extension with an "in-cell monitoring" setting) can turn
+# the monitor off for a kernel without touching the wire protocol: nothing is
+# displayed and listener events are dropped at the kernel. The initial value
+# comes from the environment so a kernel can start fully off; it can be
+# flipped at any time with `set_enabled()` or the `%cellmonitor` magic.
+# ---------------------------------------------------------------------------
+
+ENABLED_ENV_VAR = "MANAGED_SPARK_CELL_MONITORING_ENABLED"
+_FALSE_VALUES = frozenset({"0", "false", "no", "off"})
+
+
+def _enabled_from_env(environ=None):
+  """Returns False only for an explicit opt-out value; anything else is on."""
+  if environ is None:
+    environ = os.environ
+  return environ.get(ENABLED_ENV_VAR, "").strip().lower() not in _FALSE_VALUES
+
+
+_enabled = _enabled_from_env()
+_enabled_lock = threading.Lock()
+_disable_listeners = []
+_state_listeners = []
+
+
+def is_enabled():
+  """Returns True when in-cell monitoring is active for this kernel."""
+  return _enabled
+
+
+def set_enabled(enabled):
+  """Turns in-cell monitoring on or off for this kernel.
+
+  Switching off leaves monitors that are already rendered as they are, stops
+  new cells from showing one, and tells the Spark driver to pause event
+  production; switching back on takes effect from the next cell. The listener
+  connection itself is left alone so the toggle is reversible without a
+  restart.
+
+  Args:
+    enabled: True to monitor cells, False to run them without a monitor.
+
+  Returns:
+    The new state.
+  """
+  global _enabled
+  enabled = bool(enabled)
+  disable_listeners_to_call = []
+  state_listeners_to_call = []
+  with _enabled_lock:
+    changed = enabled != _enabled
+    _enabled = enabled
+    if changed:
+      state_listeners_to_call = list(_state_listeners)
+      if not enabled:
+        disable_listeners_to_call = list(_disable_listeners)
+  # Invoke outside the lock so a listener may itself call into this module.
+  for listener in disable_listeners_to_call:
+    try:
+      listener()
+    except Exception:  # pylint: disable=broad-exception-caught
+      logger.debug("Error while disabling cell monitoring", exc_info=True)
+  for listener in state_listeners_to_call:
+    try:
+      listener(enabled)
+    except Exception:  # pylint: disable=broad-exception-caught
+      logger.debug("Error while changing cell monitoring state", exc_info=True)
+  return enabled
+
+
+def add_disable_listener(callback):
+  """Registers a callable invoked whenever monitoring is switched off."""
+  with _enabled_lock:
+    if callback not in _disable_listeners:
+      _disable_listeners.append(callback)
+
+
+def remove_disable_listener(callback):
+  """Unregisters a callable added with `add_disable_listener`."""
+  with _enabled_lock:
+    if callback in _disable_listeners:
+      _disable_listeners.remove(callback)
+
+
+def add_state_listener(callback):
+  """Registers `callback(enabled)` to be invoked on every state change."""
+  with _enabled_lock:
+    if callback not in _state_listeners:
+      _state_listeners.append(callback)
+
+
+def remove_state_listener(callback):
+  """Unregisters a callable added with `add_state_listener`."""
+  with _enabled_lock:
+    if callback in _state_listeners:
+      _state_listeners.remove(callback)
 
 
 def get_jar_path(spark_version: str = "3") -> str:

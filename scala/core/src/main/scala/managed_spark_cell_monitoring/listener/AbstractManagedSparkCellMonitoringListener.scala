@@ -58,6 +58,12 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
 
   private val PortMissingFallback = "ERRORNOTFOUND"
 
+  /** Upper bound on messages waiting for the kernel; oldest are dropped past this. */
+  private val MaxQueuedMessages = 10000
+  /** Upper bound on buffered, undelimited bytes read from the kernel control channel. */
+  private val MaxControlBufferChars = 64 * 1024
+  private val FrameDelimiter = ";EOD:"
+
   val logger = Logger.getLogger(this.getClass.getName)
   val port = scala.util.Properties.envOrElse("SPARK_CELL_MONITOR_KERNEL_PORT", PortMissingFallback)
   var socket: Socket = null
@@ -66,37 +72,164 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
   var out: OutputStreamWriter = null
   val sparkStageActiveIntervalMs: Long = 250L
 
-  startConnection()
-
-  /** Send a string message to the kernel using the socket. */
-  private val messageQueue = new java.util.concurrent.LinkedBlockingQueue[String]()
+  // Pause / resume: the kernel toggles the driver with a control frame on the
+  // same socket, {"msgtype":"control","enabled":false};EOD:. While paused the
+  // job/stage/task callbacks return early, nothing is serialised or queued and
+  // the stage-progress timer is stopped; only session state (appId, executor
+  // totals) is kept. Unknown frames are ignored, so older kernels work as before.
+  @volatile var paused: Boolean = false
+  @volatile private var droppedMessages: Long = 0L
+  private val messageQueue = new java.util.concurrent.LinkedBlockingQueue[String](MaxQueuedMessages)
   @volatile private var running = true
+  private var controlThread: Thread = null
+
   private val senderThread = {
     val t = new Thread(new Runnable {
       override def run(): Unit = {
         while (running) {
           try {
             val msg = messageQueue.take()
+            var failed = false
             synchronized {
               if (out != null) {
-                out.write(msg + ";EOD:")
-                out.flush()
+                try {
+                  out.write(msg + FrameDelimiter)
+                  out.flush()
+                } catch {
+                  case e: IOException =>
+                    logger.warn("Lost connection to the Jupyter kernel; " +
+                      "stopping cell monitoring events for this application", e)
+                    failed = true
+                }
               }
             }
+            if (failed) onConnectionLost()
           } catch {
             case _: InterruptedException => Thread.currentThread().interrupt()
             case _: Throwable => ()
           }
         }
       }
-    })
+    }, "cellmonitor-sender")
     t.setDaemon(true)
     t.start()
     t
   }
 
-  def send(msg: String): Unit = {
-    messageQueue.offer(msg)
+  /**
+   * Queues a message for the kernel. The payload is passed by name so that
+   * nothing is serialised while paused or shut down. When the queue is full
+   * the oldest message is dropped so a slow kernel can never grow the driver
+   * heap.
+   */
+  def send(msg: => String): Unit = {
+    if (paused || !running) return
+    val rendered = msg
+    if (!messageQueue.offer(rendered)) {
+      messageQueue.poll()
+      if (!messageQueue.offer(rendered)) return
+      droppedMessages += 1
+      if (droppedMessages == 1 || droppedMessages % 1000 == 0) {
+        logger.warn(s"Cell monitoring queue full; dropped $droppedMessages message(s) so far")
+      }
+    }
+  }
+
+  /** Number of messages dropped because the kernel could not keep up. */
+  def droppedMessageCount: Long = droppedMessages
+
+  /** Pauses or resumes event delivery; idempotent and safe from any thread. */
+  def setPaused(pause: Boolean): Unit = synchronized {
+    if (pause == paused) return
+    paused = pause
+    if (pause) {
+      stopTimer()
+      messageQueue.clear()
+      clearTransientState()
+      logger.info("Cell monitoring paused by the kernel")
+    } else {
+      if (out != null) startTimer()
+      logger.info("Cell monitoring resumed by the kernel")
+    }
+  }
+
+  /** Forgets per-job/stage state; session-level state (appId, executors) is kept. */
+  private def clearTransientState(): Unit = synchronized {
+    jobIdToData.clear()
+    activeStages.clear()
+    completedStages.clear()
+    skippedStages.clear()
+    failedStages.clear()
+    stageIdToData.clear()
+    stageIdToInfo.clear()
+    stageIdToActiveJobIds.clear()
+  }
+
+  /** Starts the periodic stage-progress task; a cancelled Timer cannot be reused. */
+  private def startTimer(): Unit = synchronized {
+    if (activeTimer != null) return
+    activeTimer = new Timer("cellmonitor-stage-progress", true)
+    onStageStatusActiveTask = new TimerTask {
+      def run(): Unit = onStageStatusActive()
+    }
+    activeTimer.schedule(
+      onStageStatusActiveTask, sparkStageActiveIntervalMs, sparkStageActiveIntervalMs)
+  }
+
+  private def stopTimer(): Unit = synchronized {
+    if (onStageStatusActiveTask != null) {
+      try { onStageStatusActiveTask.cancel() } catch { case _: Throwable => }
+      onStageStatusActiveTask = null
+    }
+    if (activeTimer != null) {
+      try { activeTimer.cancel() } catch { case _: Throwable => }
+      activeTimer = null
+    }
+  }
+
+  /** Applies one control frame from the kernel; anything unrecognised is ignored. */
+  private[listener] def handleControlFrame(frame: String): Unit = {
+    try {
+      val json = parse(frame)
+      val msgtype = (json \ "msgtype").extractOpt[String](DefaultFormats, manifest[String])
+      val enabled = (json \ "enabled").extractOpt[Boolean](DefaultFormats, manifest[Boolean])
+      (msgtype, enabled) match {
+        case (Some("control"), Some(value)) => setPaused(!value)
+        case _ => ()
+      }
+    } catch {
+      case _: Throwable => logger.debug(s"Ignoring unparseable control frame from kernel: $frame")
+    }
+  }
+
+  /** Reads kernel -> driver control frames until the socket closes. */
+  private def startControlReader(input: InputStream): Unit = {
+    val reader = new InputStreamReader(input, java.nio.charset.StandardCharsets.UTF_8)
+    controlThread = new Thread(new Runnable {
+      override def run(): Unit = {
+        val buffer = new StringBuilder()
+        val chunk = new Array[Char](4096)
+        try {
+          var n = reader.read(chunk)
+          while (running && n != -1) {
+            buffer.appendAll(chunk, 0, n)
+            var idx = buffer.indexOf(FrameDelimiter)
+            while (idx >= 0) {
+              val frame = buffer.substring(0, idx).trim
+              buffer.delete(0, idx + FrameDelimiter.length)
+              if (frame.nonEmpty) handleControlFrame(frame)
+              idx = buffer.indexOf(FrameDelimiter)
+            }
+            if (buffer.length > MaxControlBufferChars) buffer.clear()
+            n = reader.read(chunk)
+          }
+        } catch {
+          case _: Throwable => ()
+        }
+      }
+    }, "cellmonitor-control")
+    controlThread.setDaemon(true)
+    controlThread.start()
   }
 
   /**
@@ -114,47 +247,25 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
       socket = new Socket("localhost", parsedPort)
       out = new OutputStreamWriter(
         socket.getOutputStream(), java.nio.charset.StandardCharsets.UTF_8)
-
-      activeTimer = new Timer(true)
-
-      if (onStageStatusActiveTask == null) {
-        onStageStatusActiveTask = new TimerTask {
-          def run() = {
-            onStageStatusActive()
-          }
-        }
-      }
-      activeTimer.schedule(
-        onStageStatusActiveTask, sparkStageActiveIntervalMs, sparkStageActiveIntervalMs)
+      startControlReader(socket.getInputStream())
+      if (!paused) startTimer()
     } catch {
       case e: Throwable =>
         logger.error("Failed to start connection to Jupyter kernel", e)
-        if (socket != null) {
-          try { socket.close() } catch { case _: Throwable => }
-          socket = null
-        }
-        if (out != null) {
-          try { out.close() } catch { case _: Throwable => }
-          out = null
-        }
+        closeStreams()
     }
   }
 
-  /** Close the socket connection to the kernel.*/
-  def closeConnection(): Unit = {
-    // Wait briefly for the queue to drain before shutting down
-    var waitTimeMs = 0
-    while (!messageQueue.isEmpty && waitTimeMs < 2000) {
-      Thread.sleep(10)
-      waitTimeMs += 10
-    }
-    
-    running = false
-    if (senderThread != null) {
-      try { senderThread.interrupt() } catch { case _: Throwable => }
+  /** Drops the socket after a write failure; called from the sender thread. */
+  private def onConnectionLost(): Unit = {
+    synchronized {
+      stopTimer()
+      closeStreams()
     }
     messageQueue.clear()
+  }
 
+  private def closeStreams(): Unit = synchronized {
     if (out != null) {
       try { out.close() } catch { case _: Throwable => }
       out = null
@@ -163,14 +274,33 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
       try { socket.close() } catch { case _: Throwable => }
       socket = null
     }
-    if (onStageStatusActiveTask != null) {
-      try { onStageStatusActiveTask.cancel() } catch { case _: Throwable => }
-      onStageStatusActiveTask = null
+  }
+
+  /** Close the socket connection to the kernel.*/
+  def closeConnection(): Unit = {
+    // Give the sender a moment to flush what is queued, but only while the
+    // connection is still healthy; after a write failure there is nothing to
+    // drain to.
+    if (out != null) {
+      var waitTimeMs = 0
+      while (!messageQueue.isEmpty && waitTimeMs < 2000) {
+        Thread.sleep(10)
+        waitTimeMs += 10
+      }
     }
-    if (activeTimer != null) {
-      try { activeTimer.cancel() } catch { case _: Throwable => }
-      activeTimer = null
+
+    running = false
+    if (senderThread != null) {
+      try { senderThread.interrupt() } catch { case _: Throwable => }
     }
+    messageQueue.clear()
+
+    closeStreams()
+    if (controlThread != null) {
+      try { controlThread.interrupt() } catch { case _: Throwable => }
+      controlThread = null
+    }
+    stopTimer()
   }
 
   type JobId = Int
@@ -239,6 +369,7 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
    * The total number of tasks is also estimated from the list of planned stages,
    */
   override def onJobStart(jobStart: SparkListenerJobStart): Unit = synchronized {
+    if (paused) return
 
     val jobGroup = for (
       props <- Option(jobStart.properties);
@@ -289,6 +420,7 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
 
   /** Called when a job ends. */
   override def onJobEnd(jobEnd: SparkListenerJobEnd): Unit = synchronized {
+    if (paused) return
     // The job's data is no longer needed once the end event is processed.
     val jobData = jobIdToData.remove(jobEnd.jobId)
       .getOrElse(new JobUIData(jobId = jobEnd.jobId))
@@ -325,6 +457,7 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
 
   /** Called when a stage is completed. */
   override def onStageCompleted(stageCompleted: SparkListenerStageCompleted): Unit = synchronized {
+    if (paused) return
     val stage = stageCompleted.stageInfo
     stageIdToInfo(stage.stageId) = stage
     val stageData = stageIdToData.getOrElseUpdate((stage.stageId, getStageAttemptNumber(stage)), {
@@ -362,6 +495,7 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
 
   /** Called when a stage is submitted for execution. */
   override def onStageSubmitted(stageSubmitted: SparkListenerStageSubmitted): Unit = synchronized {
+    if (paused) return
     val stage = stageSubmitted.stageInfo
     activeStages(stage.stageId) = stage
     stageIdToInfo(stage.stageId) = stage
@@ -379,6 +513,7 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
 
   /** Called when scheduled stage tasks update was requested */
   def onStageStatusActive(): Unit = synchronized {
+    if (paused) return
     // Sample time on the driver clock, the same clock that stamps job/stage
     // submission and completion times, so the frontend never has to fall back
     // to its own (skewed, delayed) wall clock for the task chart.
@@ -417,6 +552,7 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
 
   /** Called when a task is started. */
   override def onTaskStart(taskStart: SparkListenerTaskStart): Unit = synchronized {
+    if (paused) return
     val taskInfo = taskStart.taskInfo
     if (taskInfo != null && stageIdToInfo.contains(taskStart.stageId)) {
       val stageData = stageIdToData.getOrElseUpdate((taskStart.stageId, taskStart.stageAttemptId), {
@@ -429,6 +565,7 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
 
   /** Called when a task is ended. */
   override def onTaskEnd(taskEnd: SparkListenerTaskEnd): Unit = synchronized {
+    if (paused) return
     val info = taskEnd.taskInfo
     // If stage attempt id is -1, it means the DAGScheduler had no idea which attempt this task
     // completion event is for. Let's just drop it here. This means we might have some speculation
@@ -498,6 +635,10 @@ abstract class AbstractManagedSparkCellMonitoringListener(conf: SparkConf) exten
 
     send(compact(render(json)))
   }
+
+  // Connect last: the control reader may receive the kernel's current state
+  // immediately, and setPaused touches the fields declared above.
+  startConnection()
 }
 
 /** Data Structures for storing received from listener events. */

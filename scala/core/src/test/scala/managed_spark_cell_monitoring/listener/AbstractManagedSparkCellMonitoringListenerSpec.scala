@@ -420,4 +420,183 @@ class AbstractManagedSparkCellMonitoringListenerSpec extends AnyFlatSpec with Ma
       received shouldNot include ("\"name\"")
     }
   }
+  // --- Driver-side pause / resume via kernel control frames -----------------
+
+  /** Accepts the listener's connection and returns the kernel-side socket. */
+  def acceptKernelSide(server: ServerSocket): java.net.Socket = {
+    val socket = server.accept()
+    socket.setSoTimeout(5000)
+    socket
+  }
+
+  def writeControl(kernelSide: java.net.Socket, enabled: Boolean): Unit = {
+    val out = kernelSide.getOutputStream
+    out.write(s"""{"msgtype":"control","enabled":$enabled};EOD:""".getBytes("UTF-8"))
+    out.flush()
+  }
+
+  def waitUntil(timeoutMs: Long = 5000)(cond: => Boolean): Boolean = {
+    val deadline = System.currentTimeMillis() + timeoutMs
+    while (!cond && System.currentTimeMillis() < deadline) Thread.sleep(10)
+    cond
+  }
+
+  /** Reads whatever the listener wrote within `quietMs`, returning the frames. */
+  def drainFrames(kernelSide: java.net.Socket, quietMs: Int): Seq[String] = {
+    val in = kernelSide.getInputStream
+    val sb = new StringBuilder()
+    kernelSide.setSoTimeout(quietMs)
+    try {
+      var c = in.read()
+      while (c != -1) { sb.append(c.toChar); c = in.read() }
+    } catch { case _: java.net.SocketTimeoutException => () }
+    kernelSide.setSoTimeout(5000)
+    sb.toString().split(";EOD:").toSeq.filter(_.nonEmpty)
+  }
+
+  it should "pause on a control frame: no events, no timer, state cleared" in {
+    withListenerAndSocket { (listener, server) =>
+      val kernelSide = acceptKernelSide(server)
+      try {
+        listener.activeTimer shouldNot be (null)
+
+        writeControl(kernelSide, enabled = false)
+        waitUntil()(listener.paused) shouldBe true
+        waitUntil()(listener.activeTimer == null) shouldBe true
+
+        val stageInfo = mock[StageInfo]
+        when(stageInfo.stageId).thenReturn(1)
+        when(stageInfo.completionTime).thenReturn(None)
+        when(stageInfo.submissionTime).thenReturn(None)
+        when(stageInfo.name).thenReturn("stage1")
+        when(stageInfo.numTasks).thenReturn(5)
+        listener.onJobStart(SparkListenerJobStart(1, 1000L, Seq(stageInfo), new Properties()))
+        listener.onStageSubmitted(SparkListenerStageSubmitted(stageInfo))
+        listener.onStageStatusActive()
+        listener.onJobEnd(SparkListenerJobEnd(1, 2000L, JobSucceeded))
+
+        // Nothing was tracked and nothing was written while paused.
+        listener.jobIdToData shouldBe empty
+        listener.activeStages shouldBe empty
+        drainFrames(kernelSide, quietMs = 300) shouldBe empty
+      } finally {
+        kernelSide.close()
+      }
+    }
+  }
+
+  it should "resume on a control frame and deliver events again" in {
+    withListenerAndSocket { (listener, server) =>
+      val kernelSide = acceptKernelSide(server)
+      try {
+        writeControl(kernelSide, enabled = false)
+        waitUntil()(listener.paused) shouldBe true
+        drainFrames(kernelSide, quietMs = 200)
+
+        writeControl(kernelSide, enabled = true)
+        waitUntil()(!listener.paused) shouldBe true
+        waitUntil()(listener.activeTimer != null) shouldBe true
+
+        listener.onJobEnd(SparkListenerJobEnd(9, 2000L, JobSucceeded))
+        val frames = drainFrames(kernelSide, quietMs = 500)
+        frames.exists(_.contains("sparkJobEnd")) shouldBe true
+        frames.exists(_.contains("\"jobId\":9")) shouldBe true
+      } finally {
+        kernelSide.close()
+      }
+    }
+  }
+
+  it should "keep session-level state while paused" in {
+    withListenerAndSocket { (listener, server) =>
+      val kernelSide = acceptKernelSide(server)
+      try {
+        writeControl(kernelSide, enabled = false)
+        waitUntil()(listener.paused) shouldBe true
+
+        val info = mock[org.apache.spark.scheduler.cluster.ExecutorInfo]
+        when(info.totalCores).thenReturn(4)
+        listener.onExecutorAdded(SparkListenerExecutorAdded(1L, "exec-1", info))
+        listener.onApplicationStart(
+          SparkListenerApplicationStart("app", Some("app-42"), 1L, "u", None))
+
+        listener.totalCores shouldBe 4
+        listener.numExecutors shouldBe 1
+        listener.appId shouldBe "app-42"
+        drainFrames(kernelSide, quietMs = 300) shouldBe empty
+      } finally {
+        kernelSide.close()
+      }
+    }
+  }
+
+  it should "ignore unknown or malformed control frames" in {
+    withListenerAndSocket { (listener, server) =>
+      val kernelSide = acceptKernelSide(server)
+      try {
+        val out = kernelSide.getOutputStream
+        out.write("""{"msgtype":"something-else","enabled":false};EOD:not json at all;EOD:""".getBytes("UTF-8"))
+        out.flush()
+        Thread.sleep(200)
+        listener.paused shouldBe false
+        listener.activeTimer shouldNot be (null)
+        noException should be thrownBy listener.handleControlFrame("{")
+        noException should be thrownBy listener.handleControlFrame("""{"msgtype":"control"}""")
+      } finally {
+        kernelSide.close()
+      }
+    }
+  }
+
+  it should "setPaused be idempotent and restart the timer exactly once" in {
+    withListenerAndSocket { (listener, server) =>
+      val kernelSide = acceptKernelSide(server)
+      try {
+        listener.setPaused(true)
+        listener.setPaused(true)
+        listener.activeTimer shouldBe null
+        listener.setPaused(false)
+        val timer = listener.activeTimer
+        timer shouldNot be (null)
+        listener.setPaused(false)
+        listener.activeTimer should be theSameInstanceAs timer
+      } finally {
+        kernelSide.close()
+      }
+    }
+  }
+
+  it should "drop the oldest messages when the kernel stops reading" in {
+    withListenerAndSocket { (listener, server) =>
+      val kernelSide = acceptKernelSide(server)
+      try {
+        // Never read on the kernel side; eventually the socket buffers fill,
+        // the sender blocks and the queue bound kicks in.
+        val payload = "x" * 4096
+        var i = 0
+        while (listener.droppedMessageCount == 0 && i < 200000) {
+          listener.send(s"""{"msgtype":"pad","i":$i,"p":"$payload"}""")
+          i += 1
+        }
+        listener.droppedMessageCount should be > 0L
+      } finally {
+        kernelSide.close()
+      }
+    }
+  }
+
+  it should "survive the kernel closing the socket mid-stream" in {
+    withListenerAndSocket { (listener, server) =>
+      val kernelSide = acceptKernelSide(server)
+      kernelSide.close()
+      // Writes fail once the peer is gone; the listener must drop the
+      // connection and stop its timer instead of throwing.
+      waitUntil(10000) {
+        listener.onJobEnd(SparkListenerJobEnd(1, 1L, JobSucceeded))
+        listener.out == null
+      } shouldBe true
+      listener.activeTimer shouldBe null
+      noException should be thrownBy listener.send("after-close")
+    }
+  }
 }
