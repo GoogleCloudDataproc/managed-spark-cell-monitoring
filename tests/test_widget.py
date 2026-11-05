@@ -14,8 +14,12 @@
 # limitations under the License.
 """Tests for Managed Spark Cell Monitoring widget backend."""
 
+import json
+import pathlib
+import re
 from unittest import mock
 
+import managed_spark_cell_monitoring
 import managed_spark_cell_monitoring.widget as widget_module
 from managed_spark_cell_monitoring.widget import ManagedSparkCellWidget
 
@@ -114,3 +118,59 @@ def test_cell_finished_is_synced_to_frontend():
   widget.send_state = mock.MagicMock()
   widget.cell_finished = True
   widget.send_state.assert_called_with(key="cell_finished")
+
+
+def test_version_consistency_across_files():
+  """Test that Python, JS, and Scala version strings stay in lockstep."""
+  repo_root = pathlib.Path(__file__).resolve().parent.parent
+  pyproject = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+  init_py = (
+      repo_root / "managed_spark_cell_monitoring" / "__init__.py"
+  ).read_text(encoding="utf-8")
+  build_sbt = (repo_root / "scala" / "build.sbt").read_text(encoding="utf-8")
+  package_json = json.loads(
+      (repo_root / "js" / "package.json").read_text(encoding="utf-8")
+  )
+
+  pyproject_ver = re.search(
+      r'^version\s*=\s*"([^"]+)"', pyproject, re.MULTILINE
+  )
+  init_ver = re.search(
+      r'else\s+"([^"]+)"\s*#\s*x-release-please-version', init_py
+  )
+  sbt_ver = re.search(
+      r'version\s*:=\s*"([^"]+)",\s*//\s*x-release-please-version', build_sbt
+  )
+
+  assert pyproject_ver is not None
+  assert init_ver is not None
+  assert sbt_ver is not None
+  expected = pyproject_ver.group(1)
+  assert package_json["version"] == expected
+  assert init_ver.group(1) == expected
+  assert sbt_ver.group(1) == expected
+  if managed_spark_cell_monitoring.__version__ != "unknown":
+    assert managed_spark_cell_monitoring.__version__ == expected
+
+
+def test_python_floor_matches_workflows():
+  """Test that requires-python matches vermin.yaml and ci.yml."""
+  repo_root = pathlib.Path(__file__).resolve().parent.parent
+  pyproject = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+  vermin_yml = (
+      repo_root / ".github" / "workflows" / "vermin.yaml"
+  ).read_text(encoding="utf-8")
+  ci_yml = (
+      repo_root / ".github" / "workflows" / "ci.yml"
+  ).read_text(encoding="utf-8")
+
+  req_match = re.search(
+      r'^requires-python\s*=\s*">=(\d+\.\d+)"', pyproject, re.MULTILINE
+  )
+  vermin_match = re.search(r"--target=(\d+\.\d+)-", vermin_yml)
+  ci_match = re.search(r'python-version:\s*\["(\d+\.\d+)"', ci_yml)
+
+  assert req_match is not None
+  assert vermin_match is not None
+  assert ci_match is not None
+  assert req_match.group(1) == vermin_match.group(1) == ci_match.group(1)

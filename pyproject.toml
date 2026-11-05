@@ -8,7 +8,11 @@ version = "1.0.0"
 description = "Real-time cell monitoring and event visualization for Apache Spark in Jupyter notebooks."
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.8"
+# The floor matches google-cloud-spark-connect (>=3.10) and covers all
+# Dataproc / Serverless Spark 2.2+ runtimes (2.2/2.3 = 3.11-3.12, 3.0 = 3.12,
+# 4.0 = 3.13). When changing the floor, also update .github/workflows/vermin.yaml
+# and the matrix in .github/workflows/ci.yml.
+requires-python = ">=3.10"
 authors = [
     { name = "Google LLC" }
 ]
@@ -20,6 +24,12 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 dependencies = [

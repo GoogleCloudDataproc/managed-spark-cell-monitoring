@@ -1,0 +1,6 @@
+releaseType: python
+handleGHRelease: true
+extraFiles:
+  - js/package.json
+  - managed_spark_cell_monitoring/__init__.py
+  - scala/build.sbt
