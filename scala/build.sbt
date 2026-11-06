@@ -29,7 +29,7 @@ lazy val assemblySettings = Seq(
 
 lazy val commonSettings = Seq(
   organization := "com.google.cloud.dataproc",
-  version := "1.0.0", // x-release-please-version
+  version := "1.0.1", // x-release-please-version
   Compile / unmanagedSourceDirectories += (ThisBuild / baseDirectory).value / "core" / "src" / "main" / "scala",
   Test / unmanagedSourceDirectories += (ThisBuild / baseDirectory).value / "core" / "src" / "test" / "scala"
 )
