@@ -143,7 +143,7 @@ def get_jar_path(spark_version: str = "3") -> str:
   version_str = (
       __version__
       if __version__ != "unknown"
-      else "1.0.1"  # x-release-please-version
+      else "1.0.2"  # x-release-please-version
   )
   target_name = f"managed-spark-cell-monitoring-spark{spark_version}-assembly-{version_str}.jar"
   target_path = listeners_dir / target_name
