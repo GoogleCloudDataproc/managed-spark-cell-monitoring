@@ -15,7 +15,25 @@
  * limitations under the License.
  */
 
+import { makeAutoObservable, observable } from 'mobx';
 import type { NotebookStore } from './notebook';
+
+export interface RunningTasksSnapshot {
+  slot_width_ms: number;
+  start_time_ms: number;
+  values: number[];
+}
+
+export interface OperationJobMarker {
+  time: number;
+  text: string;
+}
+
+type StepPoint = {
+  time: number;
+  value: number;
+  syntheticEnd?: boolean;
+};
 
 export class TaskChartStore {
   jobDataX: Array<number> = [];
@@ -27,7 +45,27 @@ export class TaskChartStore {
   taskDataY: Array<number> = [];
   numActiveTasks = 0;
 
-  constructor(private notebookStore: NotebookStore) {}
+  private operationSeries = new Map<string, StepPoint[]>();
+  private operationJobMarkers = new Map<string, OperationJobMarker[]>();
+
+  constructor(private notebookStore: NotebookStore) {
+    makeAutoObservable<
+      TaskChartStore,
+      'notebookStore' | 'operationSeries' | 'operationJobMarkers'
+    >(this, {
+      notebookStore: false,
+      operationSeries: false,
+      operationJobMarkers: false,
+      jobDataX: observable.shallow,
+      jobDataY: observable.shallow,
+      jobDataText: observable.shallow,
+      executorDataX: observable.shallow,
+      executorDataY: observable.shallow,
+      taskDataX: observable.shallow,
+      taskDataY: observable.shallow,
+    });
+  }
+
   reset() {
     this.jobDataX = [];
     this.jobDataY = [];
@@ -37,6 +75,189 @@ export class TaskChartStore {
     this.taskDataX = [];
     this.taskDataY = [];
     this.numActiveTasks = 0;
+    this.operationSeries.clear();
+    this.operationJobMarkers.clear();
+  }
+
+  removeOperation(operationId: string) {
+    const hadSeries = this.operationSeries.delete(operationId);
+    const hadMarkers = this.operationJobMarkers.delete(operationId);
+    if (hadSeries || hadMarkers) {
+      this.rebuildFromOperations();
+    }
+  }
+
+  getOperationMaxTime(operationId: string): number {
+    const pts = this.operationSeries.get(operationId);
+    if (!pts || pts.length === 0) {
+      return Number.NaN;
+    }
+    return pts[pts.length - 1].time;
+  }
+
+  /**
+   * Replaces `operationId`'s RunningTasks step series and job boundary markers,
+   * then recomputes the merged cell-level chart series across all operations in
+   * the cell. When `closeOutAt` is provided (terminal operation), ensures the
+   * operation's running-task contribution drops to 0.
+   */
+  updateOperationSeries(
+    operationId: string,
+    runningTasks: RunningTasksSnapshot | null | undefined,
+    jobMarkers: OperationJobMarker[],
+    options: {
+      replaceSeries: boolean;
+      closeOutAt?: number;
+    },
+  ) {
+    this.operationJobMarkers.set(operationId, jobMarkers);
+
+    const isRunning = options.closeOutAt === undefined;
+    let points: StepPoint[] | undefined;
+    if (options.replaceSeries) {
+      points = runningTasks
+        ? this.decodeRunningTasks(runningTasks, isRunning)
+        : [];
+    } else {
+      const existing = this.operationSeries.get(operationId);
+      points = existing
+        ? existing
+            .filter((p) => isRunning || !p.syntheticEnd)
+            .map((p) => ({ ...p }))
+        : [];
+    }
+
+    if (options.closeOutAt !== undefined && points.length > 0) {
+      const last = points[points.length - 1];
+      if (last.value > 0) {
+        const end = Number.isFinite(options.closeOutAt)
+          ? Math.max(options.closeOutAt, last.time)
+          : last.time;
+        points.push({ time: end, value: 0 });
+      }
+    }
+
+    this.operationSeries.set(operationId, points);
+    this.rebuildFromOperations();
+  }
+
+  private decodeRunningTasks(
+    rt: RunningTasksSnapshot,
+    extendLatestSlot: boolean,
+  ): StepPoint[] {
+    const slotWidth = Number(rt.slot_width_ms);
+    const rawStart =
+      rt.start_time_ms ?? (rt as unknown as { start_time?: number }).start_time;
+    const startTime = Number(rawStart);
+    const values = Array.isArray(rt.values) ? rt.values : [];
+
+    if (
+      !Number.isFinite(slotWidth) ||
+      slotWidth <= 0 ||
+      !Number.isFinite(startTime) ||
+      values.length === 0
+    ) {
+      return [];
+    }
+
+    const points: StepPoint[] = [];
+    for (let i = 0; i < values.length; i++) {
+      const val = Math.max(0, Number(values[i]) || 0);
+      if (points.length === 0 || points[points.length - 1].value !== val) {
+        points.push({ time: startTime + i * slotWidth, value: val });
+      }
+    }
+
+    if (extendLatestSlot && points.length > 0) {
+      const last = points[points.length - 1];
+      const slotEnd = startTime + values.length * slotWidth;
+      if (last.value > 0 && last.time < slotEnd) {
+        points.push({ time: slotEnd, value: last.value, syntheticEnd: true });
+      }
+    }
+
+    return points;
+  }
+
+  private rebuildFromOperations() {
+    type TaggedEvent = {
+      time: number;
+      opOrder: number;
+      seq: number;
+      opId: string;
+      value: number;
+    };
+
+    const events: TaggedEvent[] = [];
+    let opOrder = 0;
+    this.operationSeries.forEach((points, opId) => {
+      for (let i = 0; i < points.length; i++) {
+        events.push({
+          time: points[i].time,
+          opOrder,
+          seq: i,
+          opId,
+          value: points[i].value,
+        });
+      }
+      opOrder++;
+    });
+
+    events.sort(
+      (a, b) => a.time - b.time || a.opOrder - b.opOrder || a.seq - b.seq,
+    );
+
+    const currentByOp = new Map<string, number>();
+    let runningTotal = 0;
+    const newTaskX: number[] = [];
+    const newTaskY: number[] = [];
+
+    let idx = 0;
+    while (idx < events.length) {
+      const t = events[idx].time;
+      const seenOpsAtTime = new Set<string>();
+      while (idx < events.length && events[idx].time === t) {
+        const ev = events[idx];
+        if (seenOpsAtTime.has(ev.opId)) {
+          // Same operation changed twice at identical timestamp (e.g. clamped
+          // spike -> closeOut): flush intermediate point before overwriting.
+          newTaskX.push(t);
+          newTaskY.push(runningTotal);
+          seenOpsAtTime.clear();
+        }
+        seenOpsAtTime.add(ev.opId);
+        const prev = currentByOp.get(ev.opId) ?? 0;
+        currentByOp.set(ev.opId, ev.value);
+        runningTotal += ev.value - prev;
+        idx++;
+      }
+      newTaskX.push(t);
+      newTaskY.push(Math.max(0, runningTotal));
+    }
+
+    const cores = this.notebookStore.numTotalCores || 0;
+    const newExecX = newTaskX.slice();
+    const newExecY = new Array<number>(newTaskX.length).fill(cores);
+
+    const allMarkers: OperationJobMarker[] = [];
+    this.operationJobMarkers.forEach((markers) => {
+      for (const m of markers) {
+        if (Number.isFinite(m.time) && m.time > 0) {
+          allMarkers.push(m);
+        }
+      }
+    });
+    allMarkers.sort((a, b) => a.time - b.time);
+
+    this.taskDataX = newTaskX;
+    this.taskDataY = newTaskY;
+    this.executorDataX = newExecX;
+    this.executorDataY = newExecY;
+    this.jobDataX = allMarkers.map((m) => m.time);
+    this.jobDataY = new Array<number>(allMarkers.length).fill(0);
+    this.jobDataText = allMarkers.map((m) => m.text);
+    this.numActiveTasks =
+      newTaskY.length > 0 ? newTaskY[newTaskY.length - 1] : 0;
   }
 
   /**

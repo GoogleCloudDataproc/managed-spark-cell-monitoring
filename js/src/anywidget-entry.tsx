@@ -164,6 +164,21 @@ export default {
         runInAction(() => {
           applyFinalState(msg.events, notebookStore, cellId, isLastChunk);
         });
+      } else if (msg.type === 'operation_telemetry') {
+        // Spark Connect authoritative snapshot for one operation; bypasses the
+        // Classic PySpark event sequencer and reconciles by (operation_id, version).
+        runInAction(() => {
+          notebookStore.onOperationTelemetry(cellId, msg);
+        });
+      } else if (
+        msg.type === 'replay_snapshots' &&
+        Array.isArray(msg.snapshots)
+      ) {
+        runInAction(() => {
+          for (const snap of msg.snapshots) {
+            notebookStore.onOperationTelemetry(cellId, snap);
+          }
+        });
       }
     };
 
@@ -177,6 +192,9 @@ export default {
     model.on('msg:custom', handleCustomMessage);
     model.on('change:spark_ui_url', handleSparkUiUrlChange);
     model.on('change:cell_finished', syncCellFinished);
+    // Notify the kernel once msg:custom is registered so any Spark Connect
+    // snapshots sent while the ESM bundle was loading can be replayed cleanly.
+    model.send({ type: 'widget_ready' });
 
     return () => {
       sequencer.reset();

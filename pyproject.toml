@@ -46,6 +46,7 @@ connect = [
     "protobuf>=4.25.0",
 ]
 test = [
+    "grpcio>=1.60.0",
     "protobuf>=4.25.0",
     "pytest>=7.0.0",
 ]

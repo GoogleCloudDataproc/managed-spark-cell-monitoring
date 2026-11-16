@@ -104,6 +104,14 @@
   color: #db3636;
   font-weight: 500;
 }
+.pm .active-job-cancelled-icon {
+  flex: none;
+  color: #747775;
+}
+.pm .active-job-cancelled-text {
+  color: #747775;
+  font-weight: 500;
+}
 
 /* --------------Stacked progress bar-------------------- */
 .pm .stacked-progress {

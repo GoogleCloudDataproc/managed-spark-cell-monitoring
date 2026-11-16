@@ -34,6 +34,8 @@ const CHECK_CIRCLE_ICON_PATH =
   'M16.59 7.58 10 14.17l-3.59-3.58L5 12l5 5 8-8zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z';
 const ERROR_ICON_PATH =
   'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z';
+const CANCEL_ICON_PATH =
+  'M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z';
 
 const startTimeMs = (job: SparkJob) => {
   const time = job.startTime?.getTime();
@@ -217,6 +219,38 @@ const FailedJobsSummary = observer(
   },
 );
 
+/** Final summary once the cell finished and at least one job was cancelled (with none failed). */
+const CancelledJobsSummary = observer(
+  (props: { cancelled: SparkJob[]; completedJobs: number; width: number }) => {
+    const { cancelled, completedJobs } = props;
+    const showCompleted = completedJobs > 0 && props.width >= FAILED_DETAIL_MIN_WIDTH_PX;
+    if (cancelled.length === 1) {
+      const job = cancelled[0];
+      return (
+        <span className="active-job active-job--cancelled">
+          <Icon className="active-job-cancelled-icon" path={CANCEL_ICON_PATH} size={18} />
+          <span className="active-job-name" title={job.name}>
+            {job.name}
+          </span>
+          <span className="active-job-count">
+            <span className="active-job-cancelled-text">Cancelled</span>
+            {showCompleted && ` · ${pluralizeJobs(completedJobs)} completed`}
+          </span>
+        </span>
+      );
+    }
+    return (
+      <span className="active-job active-job--cancelled" title={jobNames(cancelled)}>
+        <Icon className="active-job-cancelled-icon" path={CANCEL_ICON_PATH} size={18} />
+        <span className="active-job-count">
+          <span className="active-job-cancelled-text">{cancelled.length} cancelled</span>
+          {showCompleted && ` · ${completedJobs} completed`}
+        </span>
+      </span>
+    );
+  },
+);
+
 /** Final summary once the cell finished and every job completed. */
 const CompletedJobsSummary = (props: { completedJobs: number }) => (
   <span className="active-job active-job--done">
@@ -229,8 +263,9 @@ const CompletedJobsSummary = (props: { completedJobs: number }) => (
  * Live job strip shown in the header between the title and the view buttons.
  * While jobs run it shows one summary item for all of them. Once the cell has
  * finished executing and nothing is running any more, it shows the final
- * outcome: the failed jobs if any, otherwise the number of completed jobs.
- * Between jobs of a still-running cell it stays empty.
+ * outcome: the failed jobs if any, otherwise cancelled jobs if any, otherwise
+ * the number of completed jobs. Between jobs of a still-running cell it stays
+ * empty.
  *
  * Clicking anywhere in the strip toggles the header collapse, preserving
  * the behavior of the full-width left header area it replaces.
@@ -245,10 +280,21 @@ export const ActiveJobs = observer((props: { runningJobs: SparkJob[] }) => {
     content = <RunningJobsSummary running={runningJobs} allJobs={cell.jobs} width={stripWidth} />;
   } else if (cell.cellFinished && cell.numActiveJobs === 0) {
     const failedJobs = cell.jobs.filter((job) => job.status === 'FAILED').sort(compareOldestFirst);
+    const cancelledJobs = cell.jobs
+      .filter((job) => job.status === 'CANCELLED')
+      .sort(compareOldestFirst);
     if (failedJobs.length > 0) {
       content = (
         <FailedJobsSummary
           failed={failedJobs}
+          completedJobs={cell.numCompletedJobs}
+          width={stripWidth}
+        />
+      );
+    } else if (cancelledJobs.length > 0) {
+      content = (
+        <CancelledJobsSummary
+          cancelled={cancelledJobs}
           completedJobs={cell.numCompletedJobs}
           width={stripWidth}
         />

@@ -69,7 +69,7 @@ function addJob(
   options: {
     id: number;
     name: string;
-    status?: 'RUNNING' | 'COMPLETED' | 'FAILED';
+    status?: 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
     startTime?: number;
     numTasks?: number;
     completed?: number;
@@ -389,6 +389,31 @@ describe('ActiveJobs header strip', () => {
     expect(failed.closest('.active-job')).toHaveAttribute('title', 'first\nsecond');
     expect(screen.getByText(/· 1 completed/)).toBeInTheDocument();
     expect(screen.queryByText('first')).not.toBeInTheDocument();
+  });
+
+  it('shows Cancelled summary when a single job was cancelled', () => {
+    const { notebook, cell } = renderHeader();
+    setStripWidth(1000);
+    addJob(notebook, cell, { id: 1, name: 'done', status: 'COMPLETED', startTime: 1000 });
+    addJob(notebook, cell, { id: 2, name: 'aborted', status: 'CANCELLED', startTime: 2000 });
+    finishCell(cell);
+
+    expect(screen.getByText('aborted')).toBeInTheDocument();
+    expect(screen.getByText('Cancelled')).toBeInTheDocument();
+    expect(screen.getByText(/· 1 job completed/)).toBeInTheDocument();
+  });
+
+  it('shows "N cancelled · M completed" when multiple jobs were cancelled', () => {
+    const { notebook, cell } = renderHeader();
+    setStripWidth(1000);
+    addJob(notebook, cell, { id: 1, name: 'done', status: 'COMPLETED', startTime: 1000 });
+    addJob(notebook, cell, { id: 2, name: 'c1', status: 'CANCELLED', startTime: 2000 });
+    addJob(notebook, cell, { id: 3, name: 'c2', status: 'CANCELLED', startTime: 3000 });
+    finishCell(cell);
+
+    const cancelled = screen.getByText('2 cancelled');
+    expect(cancelled.closest('.active-job')).toHaveAttribute('title', 'c1\nc2');
+    expect(screen.getByText(/· 1 completed/)).toBeInTheDocument();
   });
 
   it('replaces the final summary when a new job starts running', () => {
