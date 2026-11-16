@@ -59,4 +59,4 @@ jobs:
     # fails only if the code needs a newer version, not if it would also run on
     # an older one.
     - name: Run vermin
-      run: vermin --no-tips --violations --eval-annotations --target=3.10- managed_spark_cell_monitoring tests
+      run: vermin --no-tips --violations --eval-annotations --target=3.10- managed_spark_cell_monitoring third_party/apache_spark scripts tests

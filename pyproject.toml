@@ -41,7 +41,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+connect = [
+    "grpcio>=1.60.0",
+    "protobuf>=4.25.0",
+]
 test = [
+    "protobuf>=4.25.0",
     "pytest>=7.0.0",
 ]
 
@@ -50,24 +55,39 @@ test = [
 # only supports Core Metadata up to 2.4 (newer hatchling defaults to 2.5).
 core-metadata-version = "2.4"
 ignore-vcs = true
-packages = ["managed_spark_cell_monitoring"]
+packages = [
+    "managed_spark_cell_monitoring",
+    "third_party/apache_spark",
+]
 artifacts = [
     "managed_spark_cell_monitoring/static/*",
     "managed_spark_cell_monitoring/static/**/*",
 ]
 exclude = [
     "**/*.map",
+    "third_party/apache_spark/*.proto",
+    "third_party/apache_spark/METADATA",
+    "third_party/apache_spark/README.google.md",
 ]
+
+[tool.hatch.build.targets.wheel.sources]
+"third_party/apache_spark" = "managed_spark_cell_monitoring/_third_party/apache_spark"
 
 [tool.hatch.build.targets.sdist]
 core-metadata-version = "2.4"
 ignore-vcs = true
 include = [
     "/managed_spark_cell_monitoring",
+    "/third_party",
     "/js",
     "/scala",
     "README.md",
     "LICENSE",
+]
+exclude = [
+    "/js/node_modules",
+    "/scala/**/target",
+    "**/__pycache__",
 ]
 artifacts = [
     "managed_spark_cell_monitoring/static/**",
