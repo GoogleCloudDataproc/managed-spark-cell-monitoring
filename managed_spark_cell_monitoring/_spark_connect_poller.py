@@ -64,6 +64,7 @@ class _TrackedOperation:
     last_version: int = 0
     saw_telemetry: bool = False
     saw_spark_tasks: bool = False
+    empty_polls_after_tasks: int = 0
     final_reconciled: bool = False
     link_suppressed: bool = True
 
@@ -112,7 +113,6 @@ def _telemetry_to_snapshot(
             "num_completed_tasks": int(job.num_completed_tasks),
             "num_active_tasks": int(job.num_active_tasks),
             "num_failed_tasks": int(job.num_failed_tasks),
-            "stage_ids": [int(sid) for sid in job.stage_ids],
         }
         if job.HasField("submission_time_ms"):
             job_dict["submission_time_ms"] = int(job.submission_time_ms)
@@ -120,25 +120,6 @@ def _telemetry_to_snapshot(
             job_dict["completion_time_ms"] = int(job.completion_time_ms)
         jobs.append(job_dict)
     snapshot["jobs"] = jobs
-
-    stages: list[dict[str, Any]] = []
-    for stage in telemetry.stages:
-        stage_dict: dict[str, Any] = {
-            "stage_id": int(stage.stage_id),
-            "attempt_id": int(stage.attempt_id),
-            "status": cell_monitor_pb2.CellMonitorTelemetry.StageStatus.Name(stage.status),
-            "num_tasks": int(stage.num_tasks),
-            "num_completed_tasks": int(stage.num_completed_tasks),
-            "num_active_tasks": int(stage.num_active_tasks),
-            "num_failed_tasks": int(stage.num_failed_tasks),
-            "parent_ids": [int(pid) for pid in stage.parent_ids],
-        }
-        if stage.HasField("submission_time_ms"):
-            stage_dict["submission_time_ms"] = int(stage.submission_time_ms)
-        if stage.HasField("completion_time_ms"):
-            stage_dict["completion_time_ms"] = int(stage.completion_time_ms)
-        stages.append(stage_dict)
-    snapshot["stages"] = stages
 
     if telemetry.HasField("running_tasks"):
         rt = telemetry.running_tasks
@@ -525,20 +506,23 @@ class CellMonitorPoller:
             is_terminal_state = op_status.state in _TERMINAL_OP_STATES
             if telemetry is None:
                 if (
-                    is_final
-                    and op_status.state != _OpState.OPERATION_STATE_UNKNOWN
+                    op_status.state != _OpState.OPERATION_STATE_UNKNOWN
                     and tracked.saw_spark_tasks
                     and not tracked.saw_telemetry
                     and not self._confirmed
                 ):
-                    logger.debug(
-                        "Server returned final GetStatus without "
-                        "CellMonitorTelemetry on task-bearing operation %s; "
-                        "disabling cell monitor polling for session.",
-                        tracked.operation_id,
-                    )
-                    self._mark_unsupported(extra_ops=ops)
-                    return
+                    with self._lock:
+                        tracked.empty_polls_after_tasks += 1
+                        trigger_fallback = is_final or tracked.empty_polls_after_tasks >= 2
+                    if trigger_fallback:
+                        logger.debug(
+                            "Server returned GetStatus without "
+                            "CellMonitorTelemetry on task-bearing operation %s; "
+                            "falling back to legacy UI for session.",
+                            tracked.operation_id,
+                        )
+                        self._mark_unsupported(extra_ops=ops)
+                        return
                 continue
 
             is_terminal = is_terminal_state or is_final or bool(telemetry.final_snapshot)

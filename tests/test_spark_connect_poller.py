@@ -83,7 +83,6 @@ def _pack_telemetry(
     unchanged: bool = False,
     final_snapshot: bool = False,
     jobs: list[cell_monitor_pb2.CellMonitorTelemetry.JobTelemetry] | None = None,
-    stages: list[cell_monitor_pb2.CellMonitorTelemetry.StageTelemetry] | None = None,
     running_tasks: cell_monitor_pb2.CellMonitorTelemetry.RunningTasks | None = None,
 ):
     msg = cell_monitor_pb2.CellMonitorTelemetry(
@@ -91,7 +90,6 @@ def _pack_telemetry(
         unchanged=unchanged,
         final_snapshot=final_snapshot,
         jobs=jobs or [],
-        stages=stages or [],
     )
     if running_tasks is not None:
         msg.running_tasks.CopyFrom(running_tasks)
@@ -160,19 +158,6 @@ def test_active_polling_since_versions_wait_for_final_and_ps8_fields():
                             num_completed_tasks=2,
                             num_active_tasks=2,
                             num_failed_tasks=0,
-                            stage_ids=[1],
-                        )
-                    ],
-                    stages=[
-                        cell_monitor_pb2.CellMonitorTelemetry.StageTelemetry(
-                            stage_id=1,
-                            attempt_id=0,
-                            status=cell_monitor_pb2.CellMonitorTelemetry.STAGE_STATUS_RUNNING,
-                            num_tasks=4,
-                            num_active_tasks=2,
-                            num_completed_tasks=2,
-                            parent_ids=[],
-                            submission_time_ms=1000,
                         )
                     ],
                     running_tasks=cell_monitor_pb2.CellMonitorTelemetry.RunningTasks(
@@ -202,7 +187,6 @@ def test_active_polling_since_versions_wait_for_final_and_ps8_fields():
                             num_completed_tasks=4,
                             num_active_tasks=0,
                             num_failed_tasks=0,
-                            stage_ids=[1],
                         )
                     ],
                 )
