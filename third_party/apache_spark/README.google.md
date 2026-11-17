@@ -13,7 +13,7 @@ this directory is remapped into the private package namespace
 
 - **Upstream Apache Spark Base Release:** [`v4.2.0`](https://github.com/apache/spark/tree/v4.2.0) (`32f7299601108917fb01920a54e084595b7b3bf8`)
 - **Internal Dataproc Branch (`dataproc-branch-4.2.0` HEAD):** `73b0dcea60c3fb2a4cddb3ed7763a5d8de8adf0a` (`bigdataoss-internal/third_party/apache/spark`)
-- **Internal Dataproc Source Commit:** `731a2caabf6cbebbbc25148b6066a70bab1752ac` (`refs/changes/87/196087/8`)
+- **Internal Dataproc Source Commit:** `bf11a13e08f8be5ab63d226fe68ec8418e469e73` (`refs/changes/87/196087/9`)
 
 ## Included Files & Local Modifications
 

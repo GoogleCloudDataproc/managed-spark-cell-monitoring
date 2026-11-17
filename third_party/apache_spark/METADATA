@@ -16,15 +16,15 @@ third_party {
     upstream_paths: "sql/connect/common/src/main/protobuf/spark/connect/base.proto"
   }
   version: "v4.2.0"
-  last_upgrade_date { year: 2026 month: 11 day: 16 }
+  last_upgrade_date { year: 2026 month: 11 day: 17 }
   license_type: NOTICE
   local_modifications:
       "Extracted minimal UserContext, GetStatusRequest, GetStatusResponse, and "
       "SparkConnectService.GetStatus definitions into spark_connect_status.proto "
       "from bigdataoss-internal/third_party/apache/spark dataproc-branch-4.2.0 "
       "(commit 73b0dcea60c3fb2a4cddb3ed7763a5d8de8adf0a), added Dataproc "
-      "cell_monitor.proto from Gerrit CL 196087 PS 8 "
-      "(ref refs/changes/87/196087/8, commit 731a2caabf6cbebbbc25148b6066a70bab1752ac), "
+      "cell_monitor.proto from Gerrit CL 196087 PS 9 "
+      "(ref refs/changes/87/196087/9, commit bf11a13e08f8be5ab63d226fe68ec8418e469e73), "
       "and generated Python protobuf stubs (*_pb2.py) via "
       "scripts/regen_protos.py. See README.google.md."
 }
