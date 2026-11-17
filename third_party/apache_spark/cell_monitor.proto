@@ -17,7 +17,7 @@
 
 syntax = "proto3";
 
-// Dataproc Cell Monitor: job, stage and task telemetry of a Spark Connect operation.
+// Dataproc Cell Monitor: job and task telemetry of a Spark Connect operation.
 //
 // Owned by Dataproc, not part of the Spark Connect protocol. Packed in google.protobuf.Any: a
 // CellMonitorTelemetryRequest in GetStatusRequest.OperationStatusRequest.extensions; a
@@ -40,29 +40,25 @@ message CellMonitorTelemetryRequest {
 }
 
 message CellMonitorTelemetry {
-  // Increases whenever jobs, stages or running tasks change, or the operation ends.
+  // Increases as the operation progresses.
   int64 version = 1;
 
-  // The version matches `since_versions`: `jobs` and `stages` are empty and `running_tasks` is
-  // unset; keep the previous snapshot.
+  // The version matches `since_versions`: `jobs` is empty and `running_tasks` is unset; keep the
+  // previous snapshot.
   bool unchanged = 2;
 
   // The ends of the operation and of all its jobs were observed; the snapshot will not change.
   // They arrive asynchronously, so this can be false after ExecutePlan returns (and
   // `OperationStatus.state` can still be RUNNING or TERMINATING). If still false after
-  // `wait_for_final`, show RUNNING jobs and stages as ended with the ExecutePlan outcome, PENDING
-  // stages as SKIPPED and no running tasks.
+  // `wait_for_final`, show RUNNING jobs as ended with the ExecutePlan outcome and no running
+  // tasks.
   bool final_snapshot = 3;
 
   // Ordered by job id. All running jobs and a bounded number of ended jobs (oldest evicted).
   repeated JobTelemetry jobs = 4;
 
-  // Ordered by stage id. All stages of running jobs and a bounded number of stages of ended jobs
-  // (oldest evicted).
-  repeated StageTelemetry stages = 5;
-
   // Unset (on a changed response) when every slot is 0.
-  RunningTasks running_tasks = 6;
+  RunningTasks running_tasks = 5;
 
   enum JobStatus {
     JOB_STATUS_UNSPECIFIED = 0;
@@ -72,20 +68,11 @@ message CellMonitorTelemetry {
     JOB_STATUS_CANCELLED = 4;
   }
 
-  enum StageStatus {
-    STAGE_STATUS_UNSPECIFIED = 0;
-    STAGE_STATUS_PENDING = 1;
-    STAGE_STATUS_RUNNING = 2;
-    STAGE_STATUS_COMPLETED = 3;
-    // Also when its job is cancelled.
-    STAGE_STATUS_FAILED = 4;
-    // Its output was already available, or its job ended before submitting it.
-    STAGE_STATUS_SKIPPED = 5;
-  }
-
-  // Counters sum the stages of the job while it runs and are frozen when it ends. A stage skipped
-  // because its output was available counts as completed; one skipped because its job failed or
-  // was cancelled first counts 0 completed tasks.
+  // Counters sum the stages of the job while it runs (each partition completes once across
+  // attempts and `num_tasks` never shrinks) and settle when it ends (`num_active_tasks` is 0, and
+  // SUCCEEDED has `num_completed_tasks` = `num_tasks`). Stages skipped because their output was
+  // already available count as completed; stages never submitted before the job failed or was
+  // cancelled count 0 completed tasks.
   message JobTelemetry {
     int64 job_id = 1;
     JobStatus status = 2;
@@ -96,25 +83,6 @@ message CellMonitorTelemetry {
     int64 num_completed_tasks = 6;
     int64 num_active_tasks = 7;
     int64 num_failed_tasks = 8;
-    // Ordered; includes stages evicted from `stages`.
-    repeated int64 stage_ids = 9;
-  }
-
-  // Counters are cumulative across attempts: each partition completes once and `num_tasks` never
-  // shrinks. COMPLETED has `num_completed_tasks` = `num_tasks`; SKIPPED has 0.
-  message StageTelemetry {
-    int64 stage_id = 1;
-    int64 attempt_id = 2;
-    StageStatus status = 3;
-    int64 num_tasks = 4;
-    int64 num_completed_tasks = 5;
-    int64 num_active_tasks = 6;
-    int64 num_failed_tasks = 7;
-    repeated int64 parent_ids = 8;
-    // For a reused SKIPPED stage, from the earlier attempt that computed it.
-    optional int64 submission_time_ms = 9;
-    // Only set together with `submission_time_ms`.
-    optional int64 completion_time_ms = 10;
   }
 
   // Running tasks over time in fixed-width slots; each value is the count at the end of its slot,

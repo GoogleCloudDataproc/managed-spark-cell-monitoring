@@ -362,13 +362,6 @@ class TestProtoWireCompatibilityAndRoundTrip(unittest.TestCase):
         self.assertEqual(telemetry_cls.JOB_STATUS_FAILED, 3)
         self.assertEqual(telemetry_cls.JOB_STATUS_CANCELLED, 4)
 
-        self.assertEqual(telemetry_cls.STAGE_STATUS_UNSPECIFIED, 0)
-        self.assertEqual(telemetry_cls.STAGE_STATUS_PENDING, 1)
-        self.assertEqual(telemetry_cls.STAGE_STATUS_RUNNING, 2)
-        self.assertEqual(telemetry_cls.STAGE_STATUS_COMPLETED, 3)
-        self.assertEqual(telemetry_cls.STAGE_STATUS_FAILED, 4)
-        self.assertEqual(telemetry_cls.STAGE_STATUS_SKIPPED, 5)
-
         telemetry = telemetry_cls(
             version=42,
             unchanged=False,
@@ -383,33 +376,9 @@ class TestProtoWireCompatibilityAndRoundTrip(unittest.TestCase):
             num_completed_tasks=9,
             num_active_tasks=0,
             num_failed_tasks=0,
-            stage_ids=[10, 11],
         )
         self.assertTrue(job.HasField("submission_time_ms"))
         self.assertTrue(job.HasField("completion_time_ms"))
-
-        telemetry.stages.add(
-            stage_id=10,
-            attempt_id=0,
-            status=telemetry_cls.STAGE_STATUS_COMPLETED,
-            num_tasks=8,
-            num_completed_tasks=8,
-            num_active_tasks=0,
-            num_failed_tasks=0,
-            parent_ids=[],
-            submission_time_ms=1762900000120,
-            completion_time_ms=1762900000900,
-        )
-        stage_skipped = telemetry.stages.add(
-            stage_id=11,
-            attempt_id=1,
-            status=telemetry_cls.STAGE_STATUS_SKIPPED,
-            num_tasks=1,
-            num_completed_tasks=0,
-            parent_ids=[10],
-        )
-        self.assertFalse(stage_skipped.HasField("submission_time_ms"))
-        self.assertFalse(stage_skipped.HasField("completion_time_ms"))
 
         telemetry.running_tasks.slot_width_ms = 200
         telemetry.running_tasks.start_time_ms = 1762900000000
@@ -455,9 +424,6 @@ class TestProtoWireCompatibilityAndRoundTrip(unittest.TestCase):
         self.assertEqual(decoded_telemetry.jobs[0].status, telemetry_cls.JOB_STATUS_SUCCEEDED)
         self.assertEqual(decoded_telemetry.jobs[0].num_tasks, 9)
         self.assertEqual(decoded_telemetry.jobs[0].num_completed_tasks, 9)
-        self.assertEqual(list(decoded_telemetry.jobs[0].stage_ids), [10, 11])
-        self.assertEqual(len(decoded_telemetry.stages), 2)
-        self.assertEqual(decoded_telemetry.stages[1].status, telemetry_cls.STAGE_STATUS_SKIPPED)
         self.assertEqual(decoded_telemetry.running_tasks.slot_width_ms, 200)
         self.assertEqual(decoded_telemetry.running_tasks.start_time_ms, 1762900000000)
         self.assertEqual(list(decoded_telemetry.running_tasks.values), [4, 8, 8, 0])
