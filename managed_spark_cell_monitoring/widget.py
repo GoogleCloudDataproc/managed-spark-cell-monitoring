@@ -17,12 +17,46 @@
 import collections
 import json
 import pathlib
+import threading
+
 import anywidget
 import traitlets
 
 # Maintained for Spark Connect which captures globals.
 # Classic PySpark routes via jobGroup.
 ACTIVE_WIDGET = None
+
+_TERMINAL_OP_STATES = frozenset(("SUCCEEDED", "FAILED", "CANCELLED"))
+
+
+def _normalize_op_state(raw):
+  """Normalizes an operation state or execution outcome string."""
+  state = str(raw or "").strip().upper()
+  if state.startswith("OPERATION_STATE_"):
+    state = state[len("OPERATION_STATE_") :]
+  if state == "CANCELED":
+    state = "CANCELLED"
+  return state
+
+
+def _is_terminal_snapshot(snapshot):
+  """Returns True if `snapshot` carries a terminal operation outcome or final flag."""
+  if bool(snapshot.get("final_snapshot")):
+    return True
+  if _normalize_op_state(snapshot.get("operation_state")) in _TERMINAL_OP_STATES:
+    return True
+  if _normalize_op_state(snapshot.get("execution_outcome")) in _TERMINAL_OP_STATES:
+    return True
+  return False
+
+
+def _snapshot_version(snapshot):
+  """Extracts an integer snapshot version, defaulting to 0."""
+  ver = snapshot.get("version", 0)
+  try:
+    return int(ver)
+  except (TypeError, ValueError):
+    return 0
 
 
 def _serialized_size(event):
@@ -107,6 +141,7 @@ class ManagedSparkCellWidget(anywidget.AnyWidget):
     self.final_job_starts = {}
     self.final_job_ends = {}
     self.final_stage_completions = {}
+    self._snapshots_lock = threading.Lock()
     self.operation_snapshots = {}
     self.final_state_sent = False
     self.on_msg(self._handle_frontend_message)
@@ -120,7 +155,8 @@ class ManagedSparkCellWidget(anywidget.AnyWidget):
       self.final_job_starts.clear()
       self.final_job_ends.clear()
       self.final_stage_completions.clear()
-      self.operation_snapshots.clear()
+      with self._snapshots_lock:
+        self.operation_snapshots.clear()
 
   def send_operation_telemetry(self, snapshot):
     """Syncs an authoritative Spark Connect operation snapshot to the frontend."""
@@ -131,21 +167,31 @@ class ManagedSparkCellWidget(anywidget.AnyWidget):
     op_id = payload.get("operation_id")
     if op_id:
       op_key = str(op_id)
-      existing = self.operation_snapshots.get(op_key)
-      if payload.get("unchanged") and existing is not None:
-        merged = dict(existing)
-        merged["version"] = payload.get("version", existing.get("version", 0))
-        merged["operation_state"] = payload.get(
-            "operation_state", existing.get("operation_state", "")
-        )
-        merged["final_snapshot"] = bool(payload.get("final_snapshot"))
-        if "execution_outcome" in payload:
-          merged["execution_outcome"] = payload["execution_outcome"]
-        if "closed_at" in payload:
-          merged["closed_at"] = payload["closed_at"]
-        self.operation_snapshots[op_key] = merged
-      else:
-        self.operation_snapshots[op_key] = payload
+      with self._snapshots_lock:
+        existing = self.operation_snapshots.get(op_key)
+        if existing is not None:
+          if _snapshot_version(payload) < _snapshot_version(existing):
+            return
+          if _is_terminal_snapshot(existing) and not _is_terminal_snapshot(
+              payload
+          ):
+            return
+        if payload.get("unchanged") and existing is not None:
+          merged = dict(existing)
+          merged["version"] = payload.get("version", existing.get("version", 0))
+          merged["operation_state"] = payload.get(
+              "operation_state", existing.get("operation_state", "")
+          )
+          merged["final_snapshot"] = bool(
+              existing.get("final_snapshot")
+          ) or bool(payload.get("final_snapshot"))
+          if "execution_outcome" in payload:
+            merged["execution_outcome"] = payload["execution_outcome"]
+          if "closed_at" in payload:
+            merged["closed_at"] = payload["closed_at"]
+          self.operation_snapshots[op_key] = merged
+        else:
+          self.operation_snapshots[op_key] = payload
     self.send(payload)
 
   def append_event(self, event, sequence):
@@ -223,10 +269,12 @@ class ManagedSparkCellWidget(anywidget.AnyWidget):
           "events": matching,
       })
     elif msg_type == "widget_ready":
-      if self.operation_snapshots:
+      with self._snapshots_lock:
+        snapshots = list(self.operation_snapshots.values())
+      if snapshots:
         self.send({
             "type": "replay_snapshots",
-            "snapshots": list(self.operation_snapshots.values()),
+            "snapshots": snapshots,
         })
     elif msg_type == "widget_unmount":
       self.cleanup(clear_history=True)
