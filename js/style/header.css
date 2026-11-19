@@ -186,6 +186,14 @@
   border-color: rgba(225, 227, 225, 0.3);
   border-top-color: #e1e3e1;
 }
+[data-jp-theme-light='false'] .pm .active-job-cancelled-icon,
+.vscode-dark .pm .active-job-cancelled-icon,
+.vscode-high-contrast .pm .active-job-cancelled-icon,
+[data-jp-theme-light='false'] .pm .active-job-cancelled-text,
+.vscode-dark .pm .active-job-cancelled-text,
+.vscode-high-contrast .pm .active-job-cancelled-text {
+  color: #e1e3e1;
+}
 
 /* --------------Reduced motion-------------------- */
 @media (prefers-reduced-motion: reduce) {

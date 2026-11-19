@@ -21,7 +21,7 @@ import { NotebookStore } from '../store/notebook';
 
 const CELL = 'cell-connect-1';
 
-describe('NotebookStore.onOperationTelemetry (PS 8 schema)', () => {
+describe('NotebookStore.onOperationTelemetry', () => {
   let nb: NotebookStore;
 
   beforeEach(() => {
@@ -93,7 +93,7 @@ describe('NotebookStore.onOperationTelemetry (PS 8 schema)', () => {
     expect(cell).toBeDefined();
     expect(cell.numActiveJobs).toBe(1);
 
-    const job = nb.jobs['nb-connect-job-10'];
+    const job = nb.jobs['nb-connect-op-op-1-job-10'];
     expect(job.name).toBe('Job 10');
     expect(job.status).toBe('RUNNING');
     expect(job.numTasks).toBe(12);
@@ -219,7 +219,7 @@ describe('NotebookStore.onOperationTelemetry (PS 8 schema)', () => {
         },
       ],
     });
-    expect(nb.jobs['nb-connect-job-1'].status).toBe('COMPLETED');
+    expect(nb.jobs['nb-connect-op-op-1-job-1'].status).toBe('COMPLETED');
 
     // ExecutePlan returned SUCCEEDED while GetStatus OperationStatus.state is still TERMINATING
     nb.onOperationTelemetry(CELL, {
@@ -379,7 +379,7 @@ describe('NotebookStore.onOperationTelemetry (PS 8 schema)', () => {
     });
 
     const cell = nb.cells[CELL];
-    const job = nb.jobs['nb-connect-job-7'];
+    const job = nb.jobs['nb-connect-op-op-cancel-job-7'];
     const stage70 = nb.stages['nb-connect-op-op-cancel-stage-70'];
     const stage71 = nb.stages['nb-connect-op-op-cancel-stage-71'];
 
@@ -395,6 +395,83 @@ describe('NotebookStore.onOperationTelemetry (PS 8 schema)', () => {
     expect(cell.taskChartStore.numActiveTasks).toBe(0);
     expect(cell.taskChartStore.taskDataX).toEqual([2000, 2250]);
     expect(cell.taskChartStore.taskDataY).toEqual([6, 0]);
+  });
+
+  it('isolates identically numbered job_ids across distinct operation_ids', () => {
+    nb.onOperationTelemetry(CELL, {
+      operation_id: 'op-first',
+      operation_state: 'OPERATION_STATE_RUNNING',
+      version: 1,
+      jobs: [
+        {
+          job_id: 0,
+          name: 'first job',
+          status: 'JOB_STATUS_RUNNING',
+          submission_time_ms: 1000,
+          num_tasks: 4,
+          num_completed_tasks: 1,
+          num_active_tasks: 3,
+          num_failed_tasks: 0,
+          stage_ids: [],
+        },
+      ],
+    });
+
+    nb.onOperationTelemetry(CELL, {
+      operation_id: 'op-second',
+      operation_state: 'OPERATION_STATE_SUCCEEDED',
+      version: 1,
+      final_snapshot: true,
+      jobs: [
+        {
+          job_id: 0,
+          name: 'second job',
+          status: 'JOB_STATUS_SUCCEEDED',
+          submission_time_ms: 2000,
+          completion_time_ms: 2200,
+          num_tasks: 8,
+          num_completed_tasks: 8,
+          num_active_tasks: 0,
+          num_failed_tasks: 0,
+          stage_ids: [],
+        },
+      ],
+    });
+
+    const first = nb.jobs['nb-connect-op-op-first-job-0'];
+    const second = nb.jobs['nb-connect-op-op-second-job-0'];
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    expect(first.name).toBe('first job');
+    expect(first.status).toBe('RUNNING');
+    expect(second.name).toBe('second job');
+    expect(second.status).toBe('COMPLETED');
+    expect(nb.cells[CELL].uniqueJobIds).toEqual([
+      'nb-connect-op-op-first-job-0',
+      'nb-connect-op-op-second-job-0',
+    ]);
+  });
+
+  it('cleans up operation tracking maps on cell removal even for jobless operations', () => {
+    nb.onOperationTelemetry(CELL, {
+      operation_id: 'op-ddl-only',
+      operation_state: 'OPERATION_STATE_SUCCEEDED',
+      version: 2,
+      final_snapshot: true,
+      jobs: [],
+      stages: [],
+    });
+
+    expect(nb.operationVersions['op-ddl-only']).toBe(2);
+    expect(nb.operationFinalized['op-ddl-only']).toBe(true);
+    expect(nb.operationCellIds['op-ddl-only']).toBe(CELL);
+
+    nb.onCellRemoved(CELL);
+
+    expect(nb.cells[CELL]).toBeUndefined();
+    expect(nb.operationVersions['op-ddl-only']).toBeUndefined();
+    expect(nb.operationFinalized['op-ddl-only']).toBeUndefined();
+    expect(nb.operationCellIds['op-ddl-only']).toBeUndefined();
   });
 });
 
@@ -459,8 +536,8 @@ describe('anywidget-entry Spark Connect snapshot messaging', () => {
     expect(nb.viewUrl).toBe(
       'https://console.cloud.google.com/dataproc/interactive/us-central1/s1',
     );
-    expect(nb.jobs['sess-sc-1-job-42'].status).toBe('RUNNING');
-    expect(nb.jobs['sess-sc-1-job-42'].name).toBe('Job 42');
+    expect(nb.jobs['sess-sc-1-op-op-replay-1-job-42'].status).toBe('RUNNING');
+    expect(nb.jobs['sess-sc-1-op-op-replay-1-job-42'].name).toBe('Job 42');
 
     fireCustom({
       type: 'operation_telemetry',
@@ -482,7 +559,7 @@ describe('anywidget-entry Spark Connect snapshot messaging', () => {
         },
       ],
     });
-    expect(nb.jobs['sess-sc-1-job-42'].status).toBe('COMPLETED');
+    expect(nb.jobs['sess-sc-1-op-op-replay-1-job-42'].status).toBe('COMPLETED');
 
     cleanup();
     expect(sent[sent.length - 1]).toEqual({ type: 'widget_unmount' });

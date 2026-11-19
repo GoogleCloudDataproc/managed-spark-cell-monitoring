@@ -255,6 +255,7 @@ class CellMonitorPoller:
         normalized_outcome = _normalize_outcome(outcome)
         with self._cond:
             tracked = self._active_ops.pop(operation_id, None)
+            already_final = tracked.final_reconciled if tracked is not None else False
             closed = self._closed
             unsupported = self._unsupported
             self._cond.notify_all()
@@ -264,7 +265,12 @@ class CellMonitorPoller:
 
         ctrl = self._get_controller()
         ui_url = self._spark_ui_url()
-        if not closed and not unsupported and not getattr(self._client, "_closed", False):
+        if (
+            not already_final
+            and not closed
+            and not unsupported
+            and not getattr(self._client, "_closed", False)
+        ):
             self._poll_once(
                 [tracked],
                 ctrl=ctrl,
@@ -368,16 +374,17 @@ class CellMonitorPoller:
             self._poll_once(ops, ctrl=ctrl, ui_url=self._spark_ui_url(), is_final=False)
 
     def _get_rpc_callable(self) -> Any:
-        if self._rpc_callable is None:
-            channel = getattr(self._client, "_channel", None)
-            if channel is None:
-                return None
-            self._rpc_callable = channel.unary_unary(
-                GRPC_GET_STATUS_METHOD,
-                request_serializer=spark_connect_status_pb2.GetStatusRequest.SerializeToString,
-                response_deserializer=spark_connect_status_pb2.GetStatusResponse.FromString,
-            )
-        return self._rpc_callable
+        with self._lock:
+            if self._rpc_callable is None:
+                channel = getattr(self._client, "_channel", None)
+                if channel is None:
+                    return None
+                self._rpc_callable = channel.unary_unary(
+                    GRPC_GET_STATUS_METHOD,
+                    request_serializer=spark_connect_status_pb2.GetStatusRequest.SerializeToString,
+                    response_deserializer=spark_connect_status_pb2.GetStatusResponse.FromString,
+                )
+            return self._rpc_callable
 
     def _build_request(
         self,
@@ -540,7 +547,7 @@ class CellMonitorPoller:
                 else:
                     if ver > tracked.last_version:
                         tracked.last_version = ver
-                    if is_terminal:
+                    if is_final or bool(telemetry.final_snapshot):
                         tracked.final_reconciled = True
                     should_push = True
 

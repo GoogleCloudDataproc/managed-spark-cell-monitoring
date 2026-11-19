@@ -17,9 +17,9 @@
 
 import { makeAutoObservable } from 'mobx';
 import { SparkStage } from './spark-stage';
-import { JobStatusType, SparkJob } from './spark-job';
+import { SparkJob } from './spark-job';
 import { Cell } from './cell';
-import type { OperationJobMarker, RunningTasksSnapshot } from './task-chart-store';
+import { applyOperationTelemetry } from './operation-telemetry';
 
 /**
  * Task counters of a job, summed over its stages. Skipped stages count as
@@ -31,65 +31,6 @@ type TaskTotals = {
   numCompletedTasks: number;
   numFailedTasks: number;
 };
-
-const TERMINAL_OP_STATES = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED']);
-
-function normalizeOperationState(raw: unknown): string {
-  const s = String(raw || '').toUpperCase();
-  return s.startsWith('OPERATION_STATE_')
-    ? s.slice('OPERATION_STATE_'.length)
-    : s;
-}
-
-function normalizeJobStatus(raw: unknown): JobStatusType {
-  const s = String(raw || '').toUpperCase();
-  const stripped = s.startsWith('JOB_STATUS_')
-    ? s.slice('JOB_STATUS_'.length)
-    : s;
-  switch (stripped) {
-    case 'SUCCEEDED':
-    case 'COMPLETED':
-      return 'COMPLETED';
-    case 'FAILED':
-      return 'FAILED';
-    case 'CANCELLED':
-    case 'CANCELED':
-      return 'CANCELLED';
-    default:
-      return 'RUNNING';
-  }
-}
-
-function normalizeStageStatus(raw: unknown): SparkStage['status'] {
-  const s = String(raw || '').toUpperCase();
-  const stripped = s.startsWith('STAGE_STATUS_')
-    ? s.slice('STAGE_STATUS_'.length)
-    : s;
-  switch (stripped) {
-    case 'PENDING':
-      return 'PENDING';
-    case 'RUNNING':
-      return 'RUNNING';
-    case 'COMPLETED':
-      return 'COMPLETED';
-    case 'FAILED':
-      return 'FAILED';
-    case 'SKIPPED':
-      return 'SKIPPED';
-    default:
-      return 'Unknown';
-  }
-}
-
-function terminalOutcomeForOpState(opState: string): JobStatusType {
-  if (opState === 'FAILED') {
-    return 'FAILED';
-  }
-  if (opState === 'CANCELLED') {
-    return 'CANCELLED';
-  }
-  return 'COMPLETED';
-}
 
 export class NotebookStore {
   // Optional fields are initialised explicitly so that MobX sees them as
@@ -110,6 +51,7 @@ export class NotebookStore {
   stages: { [stageId: string]: SparkStage } = {};
   operationVersions: { [operationId: string]: number } = {};
   operationFinalized: { [operationId: string]: boolean } = {};
+  operationCellIds: { [operationId: string]: string } = {};
 
   constructor(public notebookPanelId: string) {
     makeAutoObservable(this);
@@ -147,8 +89,13 @@ export class NotebookStore {
 
   private deleteCellData(cellId: string) {
     const cell = this.cells[cellId];
+    const opIds = new Set<string>();
+    Object.entries(this.operationCellIds).forEach(([opId, ownerCellId]) => {
+      if (ownerCellId === cellId) {
+        opIds.add(opId);
+      }
+    });
     if (cell) {
-      const opIds = new Set<string>();
       cell.uniqueJobIds.forEach(uniqueJobId => {
         const job = this.jobs[uniqueJobId];
         if (job) {
@@ -164,12 +111,13 @@ export class NotebookStore {
           delete this.jobs[uniqueJobId];
         }
       });
-      opIds.forEach((opId) => {
-        delete this.operationVersions[opId];
-        delete this.operationFinalized[opId];
-      });
       delete this.cells[cellId];
     }
+    opIds.forEach((opId) => {
+      delete this.operationVersions[opId];
+      delete this.operationFinalized[opId];
+      delete this.operationCellIds[opId];
+    });
   }
 
   onCellRemoved(cellId: string) {
@@ -227,7 +175,7 @@ export class NotebookStore {
   }
 
   /** Recomputes a job's task counters from its stages. */
-  private recomputeJobTasks(job: SparkJob) {
+  recomputeJobTasks(job: SparkJob) {
     const totals = this.sumStageTasks(job);
     job.numTasks = totals.numTasks;
     job.numActiveTasks = totals.numActiveTasks;
@@ -458,364 +406,6 @@ export class NotebookStore {
    * with `final_snapshot === false`.
    */
   onOperationTelemetry(cellId: string, data: any) {
-    if (!data || !data.operation_id) {
-      return;
-    }
-    const opId = String(data.operation_id);
-    const rawOpState = normalizeOperationState(data.operation_state);
-    const execOutcome = data.execution_outcome
-      ? normalizeOperationState(data.execution_outcome)
-      : '';
-    const finalSnapshot = Boolean(data.final_snapshot);
-    const effectiveOpState = TERMINAL_OP_STATES.has(rawOpState)
-      ? rawOpState
-      : TERMINAL_OP_STATES.has(execOutcome)
-        ? execOutcome
-        : finalSnapshot
-          ? 'SUCCEEDED'
-          : rawOpState;
-    const isTerminal = TERMINAL_OP_STATES.has(effectiveOpState);
-    const version =
-      typeof data.version === 'number' && Number.isFinite(data.version)
-        ? data.version
-        : 0;
-    const prevVersion = this.operationVersions[opId];
-
-    if (prevVersion !== undefined && version < prevVersion) {
-      return;
-    }
-
-    if (!this.cells[cellId]) {
-      this.cells[cellId] = new Cell(cellId, this);
-    }
-    const cell = this.cells[cellId];
-
-    const isUnchanged =
-      Boolean(data.unchanged) ||
-      (prevVersion !== undefined && version > 0 && version === prevVersion);
-
-    if (version > 0 || prevVersion === undefined) {
-      this.operationVersions[opId] = version;
-    }
-
-    if (isUnchanged) {
-      if (isTerminal && !this.operationFinalized[opId]) {
-        this.reconcileTerminalOperation(
-          cell,
-          opId,
-          effectiveOpState,
-          finalSnapshot,
-          data.closed_at,
-        );
-      }
-      return;
-    }
-
-    // Deduplicate stage entries by stage_id, keeping highest attempt_id.
-    const latestStagesById = new Map<number, any>();
-    const rawStages = Array.isArray(data.stages) ? data.stages : [];
-    for (const s of rawStages) {
-      if (s == null || s.stage_id == null) {
-        continue;
-      }
-      const sid = Number(s.stage_id);
-      const prev = latestStagesById.get(sid);
-      const attempt = typeof s.attempt_id === 'number' ? s.attempt_id : 0;
-      const prevAttempt =
-        prev && typeof prev.attempt_id === 'number' ? prev.attempt_id : -1;
-      if (!prev || attempt >= prevAttempt) {
-        latestStagesById.set(sid, s);
-      }
-    }
-
-    latestStagesById.forEach((s, sid) => {
-      const uniqueStageId = `${this.uniqueId}-op-${opId}-stage-${sid}`;
-      let stage = this.stages[uniqueStageId];
-      if (!stage) {
-        stage = new SparkStage();
-        stage.uniqueId = uniqueStageId;
-        stage.stageId = String(sid);
-        this.stages[uniqueStageId] = stage;
-      }
-      const stStatus = normalizeStageStatus(s.status);
-      stage.status = stStatus;
-      stage.name = s.name ? String(s.name) : `Stage ${sid}`;
-      stage.numTasks = Math.max(0, Number(s.num_tasks) || 0);
-      const isStageEnded =
-        stStatus === 'COMPLETED' ||
-        stStatus === 'FAILED' ||
-        stStatus === 'SKIPPED';
-      stage.numActiveTasks = isStageEnded
-        ? 0
-        : Math.max(0, Number(s.num_active_tasks) || 0);
-      stage.numCompletedTasks =
-        stStatus === 'SKIPPED'
-          ? 0
-          : Math.max(0, Number(s.num_completed_tasks) || 0);
-      stage.numFailedTasks = Math.max(0, Number(s.num_failed_tasks) || 0);
-      const stageSubMs = s.submission_time_ms ?? s.submission_time;
-      const stageEndMs = s.completion_time_ms ?? s.completion_time;
-      if (typeof stageSubMs === 'number' && stageSubMs > 0) {
-        stage.submissionTime = new Date(stageSubMs);
-      }
-      if (typeof stageEndMs === 'number' && stageEndMs > 0) {
-        stage.completionTime = new Date(stageEndMs);
-      }
-    });
-
-    const rawJobs = Array.isArray(data.jobs) ? data.jobs : [];
-    for (const j of rawJobs) {
-      if (j == null || j.job_id == null) {
-        continue;
-      }
-      const jid = Number(j.job_id);
-      const uniqueJobId = `${this.uniqueId}-job-${jid}`;
-      let job = this.jobs[uniqueJobId];
-      if (!job) {
-        job = new SparkJob();
-        job.uniqueId = uniqueJobId;
-        job.jobId = String(jid);
-        job.startTime = new Date(0);
-        this.jobs[uniqueJobId] = job;
-      }
-      job.operationId = opId;
-      job.cellId = cellId;
-      job.cell = cell;
-
-      const jobStatus = normalizeJobStatus(j.status);
-      job.status = jobStatus;
-
-      const stageIds: number[] = Array.isArray(j.stage_ids)
-        ? j.stage_ids.map(Number)
-        : [];
-
-      for (const sid of stageIds) {
-        const uniqueStageId = `${this.uniqueId}-op-${opId}-stage-${sid}`;
-        let stage = this.stages[uniqueStageId];
-        if (!stage) {
-          stage = new SparkStage();
-          stage.uniqueId = uniqueStageId;
-          stage.stageId = String(sid);
-          stage.status = jobStatus === 'RUNNING' ? 'PENDING' : 'SKIPPED';
-          stage.numTasks = 0;
-          this.stages[uniqueStageId] = stage;
-        }
-        stage.uniqueJobId = uniqueJobId;
-        if (!job.uniqueStageIds.includes(uniqueStageId)) {
-          job.uniqueStageIds.push(uniqueStageId);
-        }
-      }
-      job.uniqueStageIds.sort((a, b) =>
-        a.localeCompare(b, undefined, { numeric: true }),
-      );
-
-      const rawName = j.name != null ? String(j.name) : '';
-      const callSiteName = rawName ? rawName.split(' at ')[0] : '';
-      if (callSiteName && callSiteName !== 'null') {
-        job.name = callSiteName;
-      } else {
-        job.name = `Job ${jid}`;
-      }
-
-      const jobSubMs = j.submission_time_ms ?? j.submission_time;
-      const jobEndMs = j.completion_time_ms ?? j.completion_time;
-      if (typeof jobSubMs === 'number' && jobSubMs > 0) {
-        job.startTime = new Date(jobSubMs);
-      }
-      if (jobStatus !== 'RUNNING') {
-        if (typeof jobEndMs === 'number' && jobEndMs > 0) {
-          job.endTime = new Date(jobEndMs);
-        }
-      } else {
-        job.endTime = undefined;
-      }
-
-      if (typeof j.num_tasks === 'number') {
-        job.hasServerTaskCounts = true;
-        job.numTasks = Math.max(0, Number(j.num_tasks) || 0);
-        job.numCompletedTasks = Math.max(
-          0,
-          Number(j.num_completed_tasks) || 0,
-        );
-        job.numActiveTasks =
-          jobStatus !== 'RUNNING'
-            ? 0
-            : Math.max(0, Number(j.num_active_tasks) || 0);
-        job.numFailedTasks = Math.max(0, Number(j.num_failed_tasks) || 0);
-      } else {
-        this.recomputeJobTasks(job);
-        if (jobStatus !== 'RUNNING') {
-          job.numActiveTasks = 0;
-        }
-      }
-
-      if (!cell.uniqueJobIds.includes(uniqueJobId)) {
-        cell.uniqueJobIds.push(uniqueJobId);
-      }
-    }
-
-    const hasRunningTasksPayload =
-      data.running_tasks != null && typeof data.running_tasks === 'object';
-    const runningTasksPayload = hasRunningTasksPayload
-      ? (data.running_tasks as RunningTasksSnapshot)
-      : undefined;
-
-    if (isTerminal) {
-      this.reconcileTerminalOperation(
-        cell,
-        opId,
-        effectiveOpState,
-        finalSnapshot,
-        data.closed_at,
-        runningTasksPayload,
-        hasRunningTasksPayload,
-      );
-    } else {
-      const markers = this.collectOperationJobMarkers(cell, opId);
-      cell.taskChartStore.updateOperationSeries(
-        opId,
-        runningTasksPayload,
-        markers,
-        { replaceSeries: hasRunningTasksPayload },
-      );
-    }
-  }
-
-  private collectOperationJobMarkers(
-    cell: Cell,
-    opId: string,
-  ): OperationJobMarker[] {
-    const markers: OperationJobMarker[] = [];
-    for (const uniqueJobId of cell.uniqueJobIds) {
-      const job = this.jobs[uniqueJobId];
-      if (!job || job.operationId !== opId) {
-        continue;
-      }
-      const startMs = job.startTime?.getTime();
-      if (typeof startMs === 'number' && startMs > 0) {
-        markers.push({ time: startMs, text: `Job ${job.jobId} started` });
-      }
-      const endMs = job.endTime?.getTime();
-      if (typeof endMs === 'number' && endMs > 0) {
-        markers.push({ time: endMs, text: `Job ${job.jobId} ended` });
-      }
-    }
-    return markers;
-  }
-
-  private reconcileTerminalOperation(
-    cell: Cell,
-    opId: string,
-    opState: string,
-    finalSnapshot: boolean,
-    closedAt?: number,
-    runningTasksPayload?: RunningTasksSnapshot,
-    replaceSeries = false,
-  ) {
-    let closeTime =
-      typeof closedAt === 'number' && closedAt > 0 ? closedAt : Number.NaN;
-
-    const considerTime = (ms: number | undefined) => {
-      if (typeof ms === 'number' && Number.isFinite(ms) && ms > 0) {
-        closeTime = Number.isFinite(closeTime) ? Math.max(closeTime, ms) : ms;
-      }
-    };
-
-    for (const uniqueJobId of cell.uniqueJobIds) {
-      const job = this.jobs[uniqueJobId];
-      if (!job || job.operationId !== opId) {
-        continue;
-      }
-      considerTime(job.endTime?.getTime());
-      considerTime(job.startTime?.getTime());
-      for (const uniqueStageId of job.uniqueStageIds) {
-        const stage = this.stages[uniqueStageId];
-        if (stage) {
-          considerTime(stage.completionTime?.getTime());
-          considerTime(stage.submissionTime?.getTime());
-        }
-      }
-    }
-    if (runningTasksPayload) {
-      const slotWidth = Number(runningTasksPayload.slot_width_ms);
-      const startTime = Number(
-        runningTasksPayload.start_time_ms ??
-          (runningTasksPayload as unknown as { start_time?: number })
-            .start_time,
-      );
-      const count = Array.isArray(runningTasksPayload.values)
-        ? runningTasksPayload.values.length
-        : 0;
-      if (
-        Number.isFinite(slotWidth) &&
-        slotWidth > 0 &&
-        Number.isFinite(startTime) &&
-        count > 0
-      ) {
-        considerTime(startTime + count * slotWidth);
-      }
-    } else if (!replaceSeries) {
-      considerTime(cell.taskChartStore.getOperationMaxTime(opId));
-    }
-    if (!Number.isFinite(closeTime)) {
-      closeTime = Date.now();
-    }
-
-    if (!finalSnapshot) {
-      const outcome = terminalOutcomeForOpState(opState);
-      for (const uniqueJobId of cell.uniqueJobIds) {
-        const job = this.jobs[uniqueJobId];
-        if (!job || job.operationId !== opId) {
-          continue;
-        }
-        for (const uniqueStageId of job.uniqueStageIds) {
-          const stage = this.stages[uniqueStageId];
-          if (!stage) {
-            continue;
-          }
-          if (stage.status === 'PENDING') {
-            stage.status = 'SKIPPED';
-            stage.numActiveTasks = 0;
-            stage.numCompletedTasks = 0;
-          } else if (stage.status === 'RUNNING') {
-            stage.numActiveTasks = 0;
-            if (outcome === 'COMPLETED') {
-              stage.status = 'COMPLETED';
-              stage.numCompletedTasks = stage.numTasks || 0;
-            } else {
-              // Per cell_monitor.proto StageStatus, a running stage whose job
-              // fails or is cancelled ends as STAGE_STATUS_FAILED.
-              stage.status = 'FAILED';
-            }
-            if (!stage.completionTime) {
-              stage.completionTime = new Date(closeTime);
-            }
-          }
-        }
-        if (job.status === 'RUNNING') {
-          job.status = outcome;
-          job.endTime = new Date(closeTime);
-          if (job.hasServerTaskCounts && outcome === 'COMPLETED') {
-            job.numCompletedTasks = job.numTasks;
-          }
-        }
-        if (!job.hasServerTaskCounts) {
-          this.recomputeJobTasks(job);
-        }
-        job.numActiveTasks = 0;
-      }
-    }
-
-    const markers = this.collectOperationJobMarkers(cell, opId);
-    cell.taskChartStore.updateOperationSeries(
-      opId,
-      runningTasksPayload,
-      markers,
-      {
-        replaceSeries,
-        closeOutAt: closeTime,
-      },
-    );
-    this.operationFinalized[opId] = true;
+    applyOperationTelemetry(this, cellId, data);
   }
 }

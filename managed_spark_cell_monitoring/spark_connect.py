@@ -49,35 +49,30 @@ def _is_shell_running_cell(ipython: Any) -> bool:
         frame = sys._getframe(1)
     except ValueError:
         return False
+    saw_ast_nodes = False
     while frame is not None:
-        if (
-            frame.f_code.co_name in ("run_cell", "run_cell_async", "run_ast_nodes")
-            and frame.f_locals.get("self") is ipython
-        ):
-            return True
+        if frame.f_locals.get("self") is ipython:
+            name = frame.f_code.co_name
+            if name in ("run_cell", "_run_cell", "run_cell_async"):
+                if frame.f_locals.get("silent", False):
+                    return False
+                if not frame.f_locals.get("store_history", True):
+                    return False
+                return True
+            if name == "run_ast_nodes":
+                result = frame.f_locals.get("result")
+                info = getattr(result, "info", None)
+                if info is not None and (
+                    getattr(info, "silent", False)
+                    or not getattr(info, "store_history", True)
+                ):
+                    return False
+                saw_ast_nodes = True
         frame = frame.f_back
-    return False
+    return saw_ast_nodes
 
 
-def _register_cellmonitor_magic(ipython: Any) -> None:
-    """Registers `%cellmonitor [on|off|status]` on `ipython`."""
-
-    def cellmonitor(line: str = "") -> None:
-        arg = (line or "").strip().lower()
-        if arg in ("on", "enable", "enabled", "true", "1"):
-            cell_monitoring.set_enabled(True)
-        elif arg in ("off", "disable", "disabled", "false", "0"):
-            cell_monitoring.set_enabled(False)
-        elif arg not in ("", "status"):
-            print("Usage: %cellmonitor [on|off|status]")
-            return
-        state = "on" if cell_monitoring.is_enabled() else "off"
-        print(f"Managed Spark cell monitoring is {state}")
-
-    try:
-        ipython.register_magic_function(cellmonitor, magic_kind="line", magic_name="cellmonitor")
-    except Exception:
-        logger.debug("Could not register %%cellmonitor magic", exc_info=True)
+_register_cellmonitor_magic = cell_monitoring.register_cellmonitor_magic
 
 
 @dataclasses.dataclass

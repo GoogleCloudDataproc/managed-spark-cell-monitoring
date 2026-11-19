@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Unit tests for PS 8 Spark Connect GetStatus `CellMonitorPoller`."""
+"""Unit tests for Spark Connect GetStatus `CellMonitorPoller`."""
 
 import contextvars
 import threading
@@ -133,7 +133,7 @@ def _unpack_req_telemetry(
     return out
 
 
-def test_active_polling_since_versions_wait_for_final_and_ps8_fields():
+def test_active_polling_since_versions_wait_for_final_and_telemetry_fields():
     requests_seen: list[spark_connect_status_pb2.GetStatusRequest] = []
     op_state_enum = spark_connect_status_pb2.GetStatusResponse.OperationStatus
 
@@ -404,3 +404,170 @@ def test_unimplemented_and_disabled_plugin_fallback():
         assert fallback_ops == ["op-plugin-off"]
     finally:
         poller2.close()
+
+
+def test_get_rpc_callable_initializes_once_under_concurrency():
+    unary_calls = 0
+    unary_lock = threading.Lock()
+    entered = threading.Event()
+    proceed = threading.Event()
+    sentinel_rpc = object()
+
+    client = _make_fake_client(lambda req, timeout=None, metadata=None: None)
+
+    def _slow_unary_unary(method, request_serializer=None, response_deserializer=None):
+        nonlocal unary_calls
+        assert method == GRPC_GET_STATUS_METHOD
+        with unary_lock:
+            unary_calls += 1
+        entered.set()
+        proceed.wait(timeout=2.0)
+        return sentinel_rpc
+
+    client._channel.unary_unary.side_effect = _slow_unary_unary
+    poller = spark_connect.create_session_poller(
+        client,
+        controller=_FakeController(),
+        poll_interval_s=0.05,
+    )
+    results: list[object | None] = []
+    barrier = threading.Barrier(4)
+
+    def _worker():
+        barrier.wait(timeout=2.0)
+        results.append(poller._get_rpc_callable())
+
+    try:
+        threads = [threading.Thread(target=_worker) for _ in range(4)]
+        for t in threads:
+            t.start()
+        assert entered.wait(timeout=2.0)
+        proceed.set()
+        for t in threads:
+            t.join(timeout=2.0)
+
+        assert unary_calls == 1
+        assert results == [sentinel_rpc] * 4
+    finally:
+        poller.close()
+
+
+def test_terminal_state_without_final_snapshot_still_waits_for_final():
+    requests_seen: list[bool] = []
+    op_state_enum = spark_connect_status_pb2.GetStatusResponse.OperationStatus
+
+    def _handler(req, timeout=None, metadata=None):
+        tel_req = _unpack_req_telemetry(req)
+        requests_seen.append(bool(tel_req.wait_for_final))
+        resp = spark_connect_status_pb2.GetStatusResponse(
+            session_id=req.session_id,
+            server_side_session_id="srv-sess-1",
+        )
+        for op_id in req.operation_status.operation_ids:
+            if not tel_req.wait_for_final:
+                ext = _pack_telemetry(
+                    version=2,
+                    final_snapshot=False,
+                    jobs=[
+                        cell_monitor_pb2.CellMonitorTelemetry.JobTelemetry(
+                            job_id=5,
+                            status=cell_monitor_pb2.CellMonitorTelemetry.JOB_STATUS_RUNNING,
+                            num_tasks=4,
+                            num_active_tasks=2,
+                        )
+                    ],
+                )
+            else:
+                ext = _pack_telemetry(
+                    version=3,
+                    final_snapshot=True,
+                    jobs=[
+                        cell_monitor_pb2.CellMonitorTelemetry.JobTelemetry(
+                            job_id=5,
+                            status=cell_monitor_pb2.CellMonitorTelemetry.JOB_STATUS_SUCCEEDED,
+                            num_tasks=4,
+                            num_completed_tasks=4,
+                        )
+                    ],
+                )
+            resp.operation_statuses.append(
+                spark_connect_status_pb2.GetStatusResponse.OperationStatus(
+                    operation_id=op_id,
+                    state=op_state_enum.OPERATION_STATE_SUCCEEDED,
+                    extensions=[ext],
+                )
+            )
+        return resp
+
+    ctrl = _FakeController(active_cell_id="cell-term")
+    poller = spark_connect.create_session_poller(
+        _make_fake_client(_handler),
+        controller=ctrl,
+        poll_interval_s=0.05,
+    )
+    try:
+        assert poller.begin_operation("op-term")
+        assert ctrl.update_event.wait(timeout=2.0)
+
+        poller.finish_operation("op-term", outcome="SUCCEEDED")
+
+        assert False in requests_seen
+        assert True in requests_seen
+        assert ctrl.updates[-1][1]["version"] == 3
+        assert ctrl.updates[-1][1]["final_snapshot"] is True
+        assert ctrl.completed == [("cell-term", "op-term", None, "")]
+    finally:
+        poller.close()
+
+
+def test_final_snapshot_on_poll_skips_redundant_wait_for_final():
+    wait_for_final_flags: list[bool] = []
+    op_state_enum = spark_connect_status_pb2.GetStatusResponse.OperationStatus
+
+    def _handler(req, timeout=None, metadata=None):
+        tel_req = _unpack_req_telemetry(req)
+        wait_for_final_flags.append(bool(tel_req.wait_for_final))
+        ext = _pack_telemetry(
+            version=4,
+            final_snapshot=True,
+            jobs=[
+                cell_monitor_pb2.CellMonitorTelemetry.JobTelemetry(
+                    job_id=9,
+                    status=cell_monitor_pb2.CellMonitorTelemetry.JOB_STATUS_SUCCEEDED,
+                    num_tasks=2,
+                    num_completed_tasks=2,
+                )
+            ],
+        )
+        return spark_connect_status_pb2.GetStatusResponse(
+            session_id=req.session_id,
+            server_side_session_id="srv-sess-1",
+            operation_statuses=[
+                spark_connect_status_pb2.GetStatusResponse.OperationStatus(
+                    operation_id=op_id,
+                    state=op_state_enum.OPERATION_STATE_SUCCEEDED,
+                    extensions=[ext],
+                )
+                for op_id in req.operation_status.operation_ids
+            ],
+        )
+
+    ctrl = _FakeController(active_cell_id="cell-final")
+    poller = spark_connect.create_session_poller(
+        _make_fake_client(_handler),
+        controller=ctrl,
+        poll_interval_s=0.05,
+    )
+    try:
+        assert poller.begin_operation("op-final")
+        assert ctrl.update_event.wait(timeout=2.0)
+
+        poller.finish_operation("op-final", outcome="SUCCEEDED")
+
+        assert wait_for_final_flags
+        assert True not in wait_for_final_flags
+        assert len(ctrl.updates) == 1
+        assert ctrl.updates[0][1]["version"] == 4
+        assert ctrl.completed == [("cell-final", "op-final", None, "")]
+    finally:
+        poller.close()

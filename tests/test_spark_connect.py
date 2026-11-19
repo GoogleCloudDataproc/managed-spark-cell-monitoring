@@ -174,6 +174,46 @@ def test_worker_thread_resolves_active_cell_id():
     ctrl.post_run_cell_hook()
 
 
+def test_lazy_attach_skips_silent_and_unrecorded_shell_cells():
+    """Lazy attachment inside silent or store_history=False cells does not leak an active cell."""
+
+    def _run_in_shell(method, *args, **kwargs):
+        ip, _ = _make_mock_ipython()
+        ctrl = spark_connect.SparkConnectCellController()
+
+        class _FakeShellRunner:
+            def run_cell(self_runner, raw_cell, store_history=False, silent=False):
+                self = ip
+                with mock.patch("IPython.get_ipython", return_value=self):
+                    ctrl.ensure_current_shell_attached()
+                return ctrl, ctrl.current_cell_id()
+
+            def run_ast_nodes(self_runner, nodelist, cell_name, result=None):
+                self = ip
+                with mock.patch("IPython.get_ipython", return_value=self):
+                    ctrl.ensure_current_shell_attached()
+                return ctrl, ctrl.current_cell_id()
+
+        runner = _FakeShellRunner()
+        return getattr(runner, method)(*args, **kwargs)
+
+    _, silent_cid = _run_in_shell("run_cell", "x = 1", store_history=True, silent=True)
+    assert silent_cid is None
+
+    _, no_hist_cid = _run_in_shell("run_cell", "x = 1", store_history=False, silent=False)
+    assert no_hist_cid is None
+
+    silent_result = mock.Mock()
+    silent_result.info = mock.Mock(silent=True, store_history=True)
+    _, ast_silent_cid = _run_in_shell("run_ast_nodes", [], "cell", result=silent_result)
+    assert ast_silent_cid is None
+
+    ctrl_active, active_cid = _run_in_shell("run_cell", "x = 1", store_history=True, silent=False)
+    assert active_cid is not None
+    ctrl_active.post_run_cell_hook()
+    assert ctrl_active.current_cell_id() is None
+
+
 def test_disable_monitoring_freezes_active_cell_and_skips_new_cells():
     """%cellmonitor off / set_enabled(False) freezes live tracking cleanly."""
     ip, _ = _make_mock_ipython()
