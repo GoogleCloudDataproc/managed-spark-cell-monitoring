@@ -17,6 +17,7 @@
 import json
 import pathlib
 import re
+import threading
 from unittest import mock
 
 import managed_spark_cell_monitoring
@@ -174,3 +175,137 @@ def test_python_floor_matches_workflows():
   assert vermin_match is not None
   assert ci_match is not None
   assert req_match.group(1) == vermin_match.group(1) == ci_match.group(1)
+
+
+def test_operation_snapshots_monotonicity_and_terminal_protection():
+  """Stale versions and non-terminal updates cannot overwrite newer/terminal state."""
+  widget = ManagedSparkCellWidget(run_id="run-mono", session_id="sess-mono")
+  widget.send = mock.MagicMock()
+
+  widget.send_operation_telemetry({
+      "operation_id": "op-1",
+      "operation_state": "OPERATION_STATE_RUNNING",
+      "version": 5,
+      "final_snapshot": False,
+      "jobs": [{"job_id": 1, "status": "JOB_STATUS_RUNNING", "num_tasks": 4}],
+  })
+  # Lower version snapshot must be dropped without overwriting or sending.
+  widget.send_operation_telemetry({
+      "operation_id": "op-1",
+      "operation_state": "OPERATION_STATE_RUNNING",
+      "version": 4,
+      "final_snapshot": False,
+      "jobs": [{"job_id": 1, "status": "JOB_STATUS_RUNNING", "num_tasks": 2}],
+  })
+  assert widget.operation_snapshots["op-1"]["version"] == 5
+  assert widget.send.call_count == 1
+
+  # Terminal snapshot (final_snapshot=True) at version 5.
+  widget.send_operation_telemetry({
+      "operation_id": "op-1",
+      "operation_state": "OPERATION_STATE_SUCCEEDED",
+      "version": 5,
+      "final_snapshot": True,
+      "jobs": [{"job_id": 1, "status": "JOB_STATUS_SUCCEEDED", "num_tasks": 4}],
+  })
+  assert widget.send.call_count == 2
+
+  # Non-terminal update (even at higher version) must not overwrite terminal state.
+  widget.send_operation_telemetry({
+      "operation_id": "op-1",
+      "operation_state": "OPERATION_STATE_RUNNING",
+      "version": 6,
+      "final_snapshot": False,
+      "jobs": [{"job_id": 1, "status": "JOB_STATUS_RUNNING", "num_tasks": 4}],
+  })
+  assert widget.operation_snapshots["op-1"]["operation_state"] == "OPERATION_STATE_SUCCEEDED"
+  assert widget.operation_snapshots["op-1"]["final_snapshot"] is True
+  assert widget.send.call_count == 2
+
+  # Equal-version unchanged synthetic closeout preserves final_snapshot=True if already set.
+  widget.send_operation_telemetry({
+      "operation_id": "op-1",
+      "operation_state": "OPERATION_STATE_TERMINATING",
+      "execution_outcome": "SUCCEEDED",
+      "version": 5,
+      "unchanged": True,
+      "final_snapshot": False,
+  })
+  assert widget.operation_snapshots["op-1"]["final_snapshot"] is True
+  assert widget.operation_snapshots["op-1"]["execution_outcome"] == "SUCCEEDED"
+
+  # Non-terminal same-version update after synthetic execution_outcome=SUCCEEDED is ignored.
+  widget.send_operation_telemetry({
+      "operation_id": "op-2",
+      "operation_state": "OPERATION_STATE_RUNNING",
+      "version": 3,
+      "jobs": [{"job_id": 2, "status": "JOB_STATUS_RUNNING", "num_tasks": 1}],
+  })
+  widget.send_operation_telemetry({
+      "operation_id": "op-2",
+      "operation_state": "OPERATION_STATE_TERMINATING",
+      "execution_outcome": "SUCCEEDED",
+      "version": 3,
+      "unchanged": True,
+      "final_snapshot": False,
+  })
+  widget.send.reset_mock()
+  widget.send_operation_telemetry({
+      "operation_id": "op-2",
+      "operation_state": "OPERATION_STATE_RUNNING",
+      "version": 3,
+      "jobs": [{"job_id": 2, "status": "JOB_STATUS_RUNNING", "num_tasks": 1}],
+  })
+  widget.send.assert_not_called()
+  assert widget.operation_snapshots["op-2"]["execution_outcome"] == "SUCCEEDED"
+
+
+def test_operation_snapshots_thread_safety():
+  """Concurrent telemetry updates, widget_ready replays, and unmount clears stay thread-safe."""
+  widget = ManagedSparkCellWidget(run_id="run-ts", session_id="sess-ts")
+  widget.send = mock.MagicMock()
+  errors = []
+  stop = threading.Event()
+
+  def _writer(worker_idx):
+    try:
+      for ver in range(1, 150):
+        widget.send_operation_telemetry({
+            "operation_id": f"op-{worker_idx}-{ver % 5}",
+            "operation_state": "OPERATION_STATE_RUNNING",
+            "version": ver,
+            "jobs": [{"job_id": ver, "status": "JOB_STATUS_RUNNING", "num_tasks": 1}],
+        })
+    except BaseException as exc:
+      errors.append(exc)
+
+  def _reader():
+    try:
+      while not stop.is_set():
+        widget._handle_frontend_message(widget, {"type": "widget_ready"})
+    except BaseException as exc:
+      errors.append(exc)
+
+  def _cleaner():
+    try:
+      while not stop.is_set():
+        widget.cleanup(clear_history=True)
+    except BaseException as exc:
+      errors.append(exc)
+
+  threads = [threading.Thread(target=_writer, args=(i,)) for i in range(4)]
+  reader = threading.Thread(target=_reader)
+  cleaner = threading.Thread(target=_cleaner)
+  reader.start()
+  cleaner.start()
+  for t in threads:
+    t.start()
+  for t in threads:
+    t.join(timeout=5.0)
+  stop.set()
+  reader.join(timeout=5.0)
+  cleaner.join(timeout=5.0)
+
+  assert not errors
+  widget.cleanup(clear_history=True)
+  assert widget.operation_snapshots == {}

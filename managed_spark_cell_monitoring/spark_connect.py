@@ -43,6 +43,23 @@ _CURRENT_CELL_VAR: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 )
 
 
+def _extract_parent_header(ipython: Any) -> dict[str, Any]:
+    """Extracts the Jupyter message header dict from `ipython`, if available."""
+    if ipython is None:
+        return {}
+    parent = getattr(ipython, "parent_header", None)
+    if not isinstance(parent, dict) or not parent:
+        kernel = getattr(ipython, "kernel", None)
+        get_parent = getattr(kernel, "get_parent", None)
+        parent = get_parent() if callable(get_parent) else None
+    if not isinstance(parent, dict):
+        return {}
+    nested = parent.get("header")
+    if isinstance(nested, dict):
+        return nested
+    return parent
+
+
 def _is_shell_running_cell(ipython: Any) -> bool:
     """True when called synchronously from inside `ipython.run_cell(...)`."""
     try:
@@ -84,11 +101,15 @@ def _register_cellmonitor_magic(ipython: Any) -> None:
 class _CellExecutionState:
     cell_id: str
     display_context: contextvars.Context
+    token: contextvars.Token[str | None] | None = None
+    is_comm_scope: bool = False
+    comm_msg_id: str | None = None
     spark_ui_url: str = ""
     widget: ManagedSparkCellWidget | None = None
     cell_finished: bool = False
     frozen: bool = False
     active_operations: set[str] = dataclasses.field(default_factory=set)
+    widget_lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
 
 
 class SparkConnectCellController:
@@ -97,8 +118,7 @@ class SparkConnectCellController:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._notebook_session_id = str(uuid.uuid4())
-        self._active_cell_id: str | None = None
-        self._active_token: contextvars.Token[str | None] | None = None
+        self._active_stack: list[str] = []
         self._cells: dict[str, _CellExecutionState] = {}
         self._attached_shells: dict[int, Any] = {}
         cell_monitoring.add_state_listener(self._on_monitoring_state_changed)
@@ -118,7 +138,11 @@ class SparkConnectCellController:
         if events is not None and hasattr(events, "register"):
             events.register("pre_run_cell", self.pre_run_cell_hook)
             events.register("post_run_cell", self.post_run_cell_hook)
-        if self._active_cell_id is None and _is_shell_running_cell(ipython):
+            events.register("pre_execute", self.pre_execute_hook)
+            events.register("post_execute", self.post_execute_hook)
+        with self._lock:
+            has_active = bool(self._active_stack)
+        if not has_active and _is_shell_running_cell(ipython):
             self.pre_run_cell_hook()
 
     def detach_ipython(self, ipython: Any) -> None:
@@ -134,6 +158,8 @@ class SparkConnectCellController:
             for event_name, hook in (
                 ("pre_run_cell", self.pre_run_cell_hook),
                 ("post_run_cell", self.post_run_cell_hook),
+                ("pre_execute", self.pre_execute_hook),
+                ("post_execute", self.post_execute_hook),
             ):
                 try:
                     events.unregister(event_name, hook)
@@ -146,9 +172,20 @@ class SparkConnectCellController:
         ip = IPython.get_ipython()
         if ip is None:
             return False
-        if id(ip) not in self._attached_shells:
+        with self._lock:
+            already_attached = self._attached_shells.get(id(ip)) is ip
+        if not already_attached:
             self.attach_ipython(ip)
         return True
+
+    def _resolve_ipython(self) -> Any:
+        ip = IPython.get_ipython()
+        if ip is not None:
+            return ip
+        with self._lock:
+            if self._attached_shells:
+                return next(reversed(self._attached_shells.values()))
+        return None
 
     def is_enabled(self) -> bool:
         return bool(cell_monitoring.is_enabled())
@@ -159,36 +196,185 @@ class SparkConnectCellController:
             return None
         cid = _CURRENT_CELL_VAR.get()
         with self._lock:
-            resolved = cid or self._active_cell_id
-            if resolved is None or resolved not in self._cells:
-                return None
-            if self._cells[resolved].frozen:
-                return None
-            return resolved
+            if cid is not None:
+                state = self._cells.get(cid)
+                if state is not None and not state.frozen and not state.cell_finished:
+                    return cid
+            for stack_cid in reversed(self._active_stack):
+                state = self._cells.get(stack_cid)
+                if state is not None and not state.frozen and not state.cell_finished:
+                    return stack_cid
+            return None
 
-    def pre_run_cell_hook(self, *args: Any, **kwargs: Any) -> None:
-        cell_info = args[0] if args else kwargs.get("info")
-        if cell_info is not None and (
-            getattr(cell_info, "silent", False) or not getattr(cell_info, "store_history", True)
-        ):
-            with self._lock:
-                self._active_cell_id = None
-            return
+    def _close_states_locked(
+        self,
+        states: list[_CellExecutionState],
+    ) -> list[tuple[_CellExecutionState, contextvars.Token[str | None] | None]]:
+        closed: list[tuple[_CellExecutionState, contextvars.Token[str | None] | None]] = []
+        for state in states:
+            token = state.token
+            state.token = None
+            state.cell_finished = True
+            if not state.active_operations:
+                self._cells.pop(state.cell_id, None)
+            closed.append((state, token))
+        return closed
 
-        if not cell_monitoring.is_enabled():
-            with self._lock:
-                self._active_cell_id = None
+    def _pop_abandoned_comm_scopes_locked(
+        self,
+        *,
+        keep_msg_id: str | None = None,
+    ) -> list[tuple[_CellExecutionState, contextvars.Token[str | None] | None]]:
+        to_close: list[_CellExecutionState] = []
+        while self._active_stack:
+            top_id = self._active_stack[-1]
+            top_state = self._cells.get(top_id)
+            if top_state is None:
+                self._active_stack.pop()
+                continue
+            if not top_state.is_comm_scope:
+                break
+            if keep_msg_id is not None and top_state.comm_msg_id == keep_msg_id:
+                break
+            self._active_stack.pop()
+            to_close.append(top_state)
+        return self._close_states_locked(to_close)
+
+    def _finalize_closed_states(
+        self,
+        closed: list[tuple[_CellExecutionState, contextvars.Token[str | None] | None]],
+    ) -> None:
+        for state, token in closed:
+            if token is not None:
+                try:
+                    _CURRENT_CELL_VAR.reset(token)
+                except ValueError:
+                    pass
+            with state.widget_lock:
+                with self._lock:
+                    widget = state.widget
+                    frozen = state.frozen
+                    latest_url = state.spark_ui_url
+                    should_cleanup = self._cells.get(state.cell_id) is not state or (
+                        state.cell_finished and not state.active_operations
+                    )
+                if widget is not None and not frozen:
+
+                    def _mark_done(
+                        w: ManagedSparkCellWidget = widget,
+                        url: str = latest_url,
+                        do_cleanup: bool = should_cleanup,
+                    ) -> None:
+                        if url and w.spark_ui_url != url:
+                            w.spark_ui_url = url
+                        if not w.cell_finished:
+                            w.cell_finished = True
+                        if do_cleanup:
+                            w.cleanup()
+
+                    try:
+                        state.display_context.run(_mark_done)
+                    except Exception:
+                        logger.debug(
+                            "Error finalizing Spark Connect cell widget",
+                            exc_info=True,
+                        )
+
+    def pre_execute_hook(self, *args: Any, **kwargs: Any) -> None:
+        ip = kwargs.get("ipython") or self._resolve_ipython()
+        header = _extract_parent_header(ip)
+        msg_type = header.get("msg_type")
+        comm_msg_id = header.get("msg_id")
+
+        keep_msg_id = comm_msg_id if msg_type == "comm_msg" else None
+        with self._lock:
+            abandoned = self._pop_abandoned_comm_scopes_locked(keep_msg_id=keep_msg_id)
+        if abandoned:
+            self._finalize_closed_states(abandoned)
+
+        if msg_type != "comm_msg" or not cell_monitoring.is_enabled():
             return
 
         cell_id = str(uuid.uuid4())
         display_ctx = contextvars.copy_context()
         token = _CURRENT_CELL_VAR.set(cell_id)
         with self._lock:
-            self._active_cell_id = cell_id
-            self._active_token = token
+            self._active_stack.append(cell_id)
             self._cells[cell_id] = _CellExecutionState(
                 cell_id=cell_id,
                 display_context=display_ctx,
+                token=token,
+                is_comm_scope=True,
+                comm_msg_id=comm_msg_id,
+            )
+
+    def post_execute_hook(self, *args: Any, **kwargs: Any) -> None:
+        ip = kwargs.get("ipython") or self._resolve_ipython()
+        header = _extract_parent_header(ip)
+        msg_type = header.get("msg_type")
+        comm_msg_id = header.get("msg_id")
+
+        closed: list[tuple[_CellExecutionState, contextvars.Token[str | None] | None]] = []
+        with self._lock:
+            if not self._active_stack:
+                return
+            top_id = self._active_stack[-1]
+            top_state = self._cells.get(top_id)
+            if top_state is None:
+                self._active_stack.pop()
+                return
+            if not top_state.is_comm_scope:
+                return
+
+            if msg_type == "comm_msg" and comm_msg_id is not None:
+                match_idx: int | None = None
+                for idx in range(len(self._active_stack) - 1, -1, -1):
+                    cand = self._cells.get(self._active_stack[idx])
+                    if cand is not None and not cand.is_comm_scope:
+                        break
+                    if cand is not None and cand.comm_msg_id == comm_msg_id:
+                        match_idx = idx
+                        break
+                if match_idx is None:
+                    return
+                popped_ids = self._active_stack[match_idx:]
+                del self._active_stack[match_idx:]
+                to_close = [self._cells[cid] for cid in reversed(popped_ids) if cid in self._cells]
+                closed = self._close_states_locked(to_close)
+            elif msg_type == "comm_msg" or not msg_type:
+                self._active_stack.pop()
+                closed = self._close_states_locked([top_state])
+            else:
+                closed = self._pop_abandoned_comm_scopes_locked(keep_msg_id=None)
+
+        if closed:
+            self._finalize_closed_states(closed)
+
+    def pre_run_cell_hook(self, *args: Any, **kwargs: Any) -> None:
+        with self._lock:
+            abandoned = self._pop_abandoned_comm_scopes_locked(keep_msg_id=None)
+        if abandoned:
+            self._finalize_closed_states(abandoned)
+
+        cell_info = args[0] if args else kwargs.get("info")
+        if cell_info is not None and (
+            getattr(cell_info, "silent", False) or not getattr(cell_info, "store_history", True)
+        ):
+            return
+
+        if not cell_monitoring.is_enabled():
+            return
+
+        cell_id = str(uuid.uuid4())
+        display_ctx = contextvars.copy_context()
+        token = _CURRENT_CELL_VAR.set(cell_id)
+        with self._lock:
+            self._active_stack.append(cell_id)
+            self._cells[cell_id] = _CellExecutionState(
+                cell_id=cell_id,
+                display_context=display_ctx,
+                token=token,
+                is_comm_scope=False,
             )
 
     def post_run_cell_hook(self, result: Any = None) -> None:
@@ -198,46 +384,60 @@ class SparkConnectCellController:
             ):
                 return
 
-        widget_to_finish: ManagedSparkCellWidget | None = None
-        widget_to_mark_done: ManagedSparkCellWidget | None = None
+        closed: list[tuple[_CellExecutionState, contextvars.Token[str | None] | None]] = []
         with self._lock:
-            token = self._active_token
-            self._active_token = None
-            cell_id = self._active_cell_id
-            self._active_cell_id = None
-            if token is not None:
-                try:
-                    _CURRENT_CELL_VAR.reset(token)
-                except ValueError:
-                    pass
-            state = self._cells.get(cell_id) if cell_id else None
-            if state is not None:
-                state.cell_finished = True
-                widget_to_mark_done = state.widget
-                if not state.active_operations:
-                    self._cells.pop(cell_id, None)
-                    widget_to_finish = state.widget
+            match_idx: int | None = None
+            for idx in range(len(self._active_stack) - 1, -1, -1):
+                cand = self._cells.get(self._active_stack[idx])
+                if cand is not None and not cand.is_comm_scope:
+                    match_idx = idx
+                    break
+            if match_idx is None:
+                return
+            popped_ids = self._active_stack[match_idx:]
+            del self._active_stack[match_idx:]
+            to_close = [self._cells[cid] for cid in reversed(popped_ids) if cid in self._cells]
+            closed = self._close_states_locked(to_close)
 
-        if widget_to_mark_done is not None:
-            widget_to_mark_done.cell_finished = True
-        if widget_to_finish is not None:
-            widget_to_finish.cleanup()
+        if closed:
+            self._finalize_closed_states(closed)
 
     def register_operation(self, cell_id: str, operation_id: str, spark_ui_url: str = "") -> bool:
         """Marks `operation_id` as active under `cell_id`."""
         if not cell_id or not operation_id or not cell_monitoring.is_enabled():
             return False
-        widget_to_update_url: ManagedSparkCellWidget | None = None
         with self._lock:
             state = self._cells.get(cell_id)
             if state is None or state.frozen:
                 return False
             state.active_operations.add(operation_id)
-            if spark_ui_url and spark_ui_url != state.spark_ui_url:
+            url_changed = bool(spark_ui_url and spark_ui_url != state.spark_ui_url)
+            if url_changed:
                 state.spark_ui_url = spark_ui_url
-                widget_to_update_url = state.widget
-        if widget_to_update_url is not None:
-            widget_to_update_url.spark_ui_url = spark_ui_url
+            has_widget = state.widget is not None
+            widget_lock = state.widget_lock
+            display_ctx = state.display_context
+
+        if url_changed and has_widget:
+            with widget_lock:
+                with self._lock:
+                    widget = state.widget
+                    frozen = state.frozen
+                    latest_url = state.spark_ui_url
+                if (
+                    widget is not None
+                    and not frozen
+                    and latest_url
+                    and widget.spark_ui_url != latest_url
+                ):
+
+                    def _update_url() -> None:
+                        widget.spark_ui_url = latest_url
+
+                    try:
+                        display_ctx.run(_update_url)
+                    except Exception:
+                        logger.debug("Failed updating Spark UI URL on widget", exc_info=True)
         return True
 
     def update_operation(
@@ -250,47 +450,112 @@ class SparkConnectCellController:
         if not cell_id or not isinstance(snapshot, dict) or not cell_monitoring.is_enabled():
             return False
 
-        widget: ManagedSparkCellWidget | None = None
-        display_ctx: contextvars.Context | None = None
-        update_url = False
-
         with self._lock:
             state = self._cells.get(cell_id)
             if state is None or state.frozen:
                 return False
             if spark_ui_url and spark_ui_url != state.spark_ui_url:
                 state.spark_ui_url = spark_ui_url
-                update_url = True
-
-            widget = state.widget
-            has_jobs = widget is not None or bool(snapshot.get("jobs"))
-            if not has_jobs:
+            if state.widget is None and not snapshot.get("jobs") and not snapshot.get("unchanged"):
                 return False
+            widget_lock = state.widget_lock
+            display_ctx = state.display_context
+
+        with widget_lock:
+            with self._lock:
+                cur = self._cells.get(cell_id)
+                if cur is not state or state.frozen:
+                    return False
+                if not cell_monitoring.is_enabled():
+                    return False
+                if spark_ui_url and spark_ui_url != state.spark_ui_url:
+                    state.spark_ui_url = spark_ui_url
+                widget = state.widget
+                ui_url = state.spark_ui_url
+                cell_finished = state.cell_finished
 
             if widget is None:
-                widget = ManagedSparkCellWidget(
-                    run_id=cell_id,
-                    session_id=self._notebook_session_id,
-                    spark_ui_url=state.spark_ui_url,
-                )
-                widget.cell_finished = state.cell_finished
-                state.widget = widget
-                display_ctx = state.display_context
-                update_url = False
+                if not snapshot.get("jobs"):
+                    return False
+                try:
+                    created = display_ctx.run(
+                        ManagedSparkCellWidget,
+                        run_id=cell_id,
+                        session_id=self._notebook_session_id,
+                        spark_ui_url=ui_url,
+                        cell_finished=cell_finished,
+                    )
+                except Exception:
+                    logger.debug("Failed to create Spark Connect cell widget", exc_info=True)
+                    return False
 
-        if display_ctx is not None and widget is not None:
-            try:
-                display_ctx.run(IPython.display.display, widget)
-            except Exception:
-                logger.debug("Failed to display Spark Connect cell widget", exc_info=True)
-                return False
-        elif update_url and widget is not None:
-            widget.spark_ui_url = spark_ui_url
+                try:
+                    display_ctx.run(IPython.display.display, created)
+                except Exception:
+                    logger.debug("Failed to display Spark Connect cell widget", exc_info=True)
 
-        if widget is not None:
-            widget.send_operation_telemetry(snapshot)
+                    def _cleanup_failed_display() -> None:
+                        created.cleanup(clear_history=True)
+                        if hasattr(created, "close"):
+                            created.close()
+
+                    try:
+                        display_ctx.run(_cleanup_failed_display)
+                    except Exception:
+                        pass
+                    return False
+
+                with self._lock:
+                    if state.frozen or not cell_monitoring.is_enabled():
+                        frozen_mid_flight = True
+                        latest_url = ""
+                        latest_finished = True
+                        should_cleanup = True
+                    else:
+                        frozen_mid_flight = False
+                        state.widget = created
+                        latest_url = state.spark_ui_url
+                        latest_finished = state.cell_finished
+                        should_cleanup = self._cells.get(cell_id) is not state or (
+                            state.cell_finished and not state.active_operations
+                        )
+
+                if frozen_mid_flight:
+
+                    def _cleanup_frozen() -> None:
+                        created.cell_finished = True
+                        created.cleanup()
+
+                    try:
+                        display_ctx.run(_cleanup_frozen)
+                    except Exception:
+                        logger.debug(
+                            "Error cleaning up frozen Spark Connect cell widget",
+                            exc_info=True,
+                        )
+                    return False
+
+                def _finish_created_telemetry() -> None:
+                    if latest_url and created.spark_ui_url != latest_url:
+                        created.spark_ui_url = latest_url
+                    if latest_finished and not created.cell_finished:
+                        created.cell_finished = True
+                    created.send_operation_telemetry(snapshot)
+                    if should_cleanup:
+                        created.cleanup()
+
+                display_ctx.run(_finish_created_telemetry)
+                return True
+
+            def _send_existing_telemetry() -> None:
+                if ui_url and widget.spark_ui_url != ui_url:
+                    widget.spark_ui_url = ui_url
+                if cell_finished and not widget.cell_finished:
+                    widget.cell_finished = True
+                widget.send_operation_telemetry(snapshot)
+
+            display_ctx.run(_send_existing_telemetry)
             return True
-        return False
 
     def complete_operation(
         self,
@@ -303,39 +568,87 @@ class SparkConnectCellController:
         if final_snapshot is not None:
             self.update_operation(cell_id, final_snapshot, spark_ui_url=spark_ui_url)
 
-        widget_to_finish: ManagedSparkCellWidget | None = None
         with self._lock:
             state = self._cells.get(cell_id)
             if state is None:
                 return
             state.active_operations.discard(operation_id)
-            if state.cell_finished and not state.active_operations:
+            url_changed = bool(spark_ui_url and spark_ui_url != state.spark_ui_url)
+            if url_changed:
+                state.spark_ui_url = spark_ui_url
+            should_finish = state.cell_finished and not state.active_operations and not state.frozen
+            if should_finish:
                 self._cells.pop(cell_id, None)
-                widget_to_finish = state.widget
+            has_widget = state.widget is not None
+            widget_lock = state.widget_lock
+            display_ctx = state.display_context
 
-        if widget_to_finish is not None:
-            widget_to_finish.cell_finished = True
-            widget_to_finish.cleanup()
+        if not (should_finish or (url_changed and has_widget)):
+            return
+
+        with widget_lock:
+            with self._lock:
+                widget = state.widget
+                frozen = state.frozen
+                latest_url = state.spark_ui_url
+                should_cleanup = self._cells.get(cell_id) is not state or (
+                    state.cell_finished and not state.active_operations
+                )
+            if widget is not None and not frozen:
+
+                def _sync_on_complete() -> None:
+                    if latest_url and widget.spark_ui_url != latest_url:
+                        widget.spark_ui_url = latest_url
+                    if should_finish:
+                        if not widget.cell_finished:
+                            widget.cell_finished = True
+                        if should_cleanup:
+                            widget.cleanup()
+
+                try:
+                    display_ctx.run(_sync_on_complete)
+                except Exception:
+                    logger.debug(
+                        "Error finalizing Spark Connect cell widget on operation completion",
+                        exc_info=True,
+                    )
 
     def freeze_all_widgets(self) -> None:
         """Stops tracking live Spark Connect cells while leaving panels intact."""
+        tokens_to_reset: list[contextvars.Token[str | None]] = []
         with self._lock:
             states = list(self._cells.values())
             for st in states:
                 st.frozen = True
+                if st.token is not None:
+                    tokens_to_reset.append(st.token)
+                    st.token = None
             self._cells.clear()
-            self._active_cell_id = None
-            self._active_token = None
+            self._active_stack.clear()
+
+        for token in reversed(tokens_to_reset):
+            try:
+                _CURRENT_CELL_VAR.reset(token)
+            except ValueError:
+                pass
+
         for st in states:
-            if st.widget is not None:
-                try:
-                    st.widget.cell_finished = True
-                    st.widget.cleanup()
-                except Exception:
-                    logger.debug(
-                        "Error freezing Spark Connect cell widget",
-                        exc_info=True,
-                    )
+            with st.widget_lock:
+                with self._lock:
+                    widget = st.widget
+                if widget is not None:
+
+                    def _freeze_widget(w: ManagedSparkCellWidget = widget) -> None:
+                        w.cell_finished = True
+                        w.cleanup()
+
+                    try:
+                        st.display_context.run(_freeze_widget)
+                    except Exception:
+                        logger.debug(
+                            "Error freezing Spark Connect cell widget",
+                            exc_info=True,
+                        )
 
     def _on_monitoring_state_changed(self, enabled: bool) -> None:
         if not enabled:
