@@ -27,6 +27,7 @@ from google.protobuf import descriptor as _descriptor
 from google.protobuf import descriptor_pool as _descriptor_pool
 from google.protobuf import symbol_database as _symbol_database
 from google.protobuf.internal import builder as _builder
+
 # @@protoc_insertion_point(imports)
 
 _sym_db = _symbol_database.Default()
@@ -34,9 +35,10 @@ _sym_db = _symbol_database.Default()
 
 from google.protobuf import any_pb2 as google_dot_protobuf_dot_any__pb2
 
-
 _POOL = _descriptor_pool.DescriptorPool()
-_ANY_DESCRIPTOR = _POOL.AddSerializedFile(google_dot_protobuf_dot_any__pb2.DESCRIPTOR.serialized_pb)
+_ANY_DESCRIPTOR = _POOL.AddSerializedFile(
+    google_dot_protobuf_dot_any__pb2.DESCRIPTOR.serialized_pb
+)
 DESCRIPTOR = _POOL.AddSerializedFile(
     b'\n\x1aspark_connect_status.proto\x12\rspark.connect\x1a\x19google/protobuf/any.proto"\\\n\x0bUserContext\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x11\n\tuser_name\x18\x02 \x01(\t\x12)\n\nextensions\x18\xe7\x07 \x03(\x0b\x32\x14.google.protobuf.Any"\xd5\x03\n\x10GetStatusRequest\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x30\n\x0cuser_context\x18\x02 \x01(\x0b\x32\x1a.spark.connect.UserContext\x12\x18\n\x0b\x63lient_type\x18\x03 \x01(\tH\x00\x88\x01\x01\x12\x33\n&client_observed_server_side_session_id\x18\x04 \x01(\tH\x01\x88\x01\x01\x12U\n\x10operation_status\x18\x05 \x01(\x0b\x32\x36.spark.connect.GetStatusRequest.OperationStatusRequestH\x02\x88\x01\x01\x12)\n\nextensions\x18\xe7\x07 \x03(\x0b\x32\x14.google.protobuf.Any\x1aZ\n\x16OperationStatusRequest\x12\x15\n\roperation_ids\x18\x01 \x03(\t\x12)\n\nextensions\x18\xe7\x07 \x03(\x0b\x32\x14.google.protobuf.AnyB\x0e\n\x0c_client_typeB)\n\'_client_observed_server_side_session_idB\x13\n\x11_operation_status"\xce\x04\n\x11GetStatusResponse\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x1e\n\x16server_side_session_id\x18\x02 \x01(\t\x12L\n\x12operation_statuses\x18\x03 \x03(\x0b\x32\x30.spark.connect.GetStatusResponse.OperationStatus\x12)\n\nextensions\x18\xe7\x07 \x03(\x0b\x32\x14.google.protobuf.Any\x1a\x8b\x03\n\x0fOperationStatus\x12\x14\n\x0coperation_id\x18\x01 \x01(\t\x12N\n\x05state\x18\x02 \x01(\x0e\x32?.spark.connect.GetStatusResponse.OperationStatus.OperationState\x12)\n\nextensions\x18\xe7\x07 \x03(\x0b\x32\x14.google.protobuf.Any"\xe6\x01\n\x0eOperationState\x12\x1f\n\x1bOPERATION_STATE_UNSPECIFIED\x10\x00\x12\x1b\n\x17OPERATION_STATE_UNKNOWN\x10\x01\x12\x1b\n\x17OPERATION_STATE_RUNNING\x10\x02\x12\x1f\n\x1bOPERATION_STATE_TERMINATING\x10\x03\x12\x1d\n\x19OPERATION_STATE_SUCCEEDED\x10\x04\x12\x1a\n\x16OPERATION_STATE_FAILED\x10\x05\x12\x1d\n\x19OPERATION_STATE_CANCELLED\x10\x06\x32g\n\x13SparkConnectService\x12P\n\tGetStatus\x12\x1f.spark.connect.GetStatusRequest\x1a .spark.connect.GetStatusResponse"\x00\x42\x36\n\x1eorg.apache.spark.connect.protoP\x01Z\x12internal/generatedb\x06proto3'
 )
@@ -60,9 +62,9 @@ finally:
     _builder._sym_db = _orig_sym_db
 if not _descriptor._USE_C_DESCRIPTORS:
     _globals["DESCRIPTOR"]._loaded_options = None
-    _globals[
-        "DESCRIPTOR"
-    ]._serialized_options = b"\n\036org.apache.spark.connect.protoP\001Z\022internal/generated"
+    _globals["DESCRIPTOR"]._serialized_options = (
+        b"\n\036org.apache.spark.connect.protoP\001Z\022internal/generated"
+    )
     _globals["_USERCONTEXT"]._serialized_start = 72
     _globals["_USERCONTEXT"]._serialized_end = 164
     _globals["_GETSTATUSREQUEST"]._serialized_start = 167
@@ -73,7 +75,9 @@ if not _descriptor._USE_C_DESCRIPTORS:
     _globals["_GETSTATUSRESPONSE"]._serialized_end = 1229
     _globals["_GETSTATUSRESPONSE_OPERATIONSTATUS"]._serialized_start = 834
     _globals["_GETSTATUSRESPONSE_OPERATIONSTATUS"]._serialized_end = 1229
-    _globals["_GETSTATUSRESPONSE_OPERATIONSTATUS_OPERATIONSTATE"]._serialized_start = 999
+    _globals["_GETSTATUSRESPONSE_OPERATIONSTATUS_OPERATIONSTATE"]._serialized_start = (
+        999
+    )
     _globals["_GETSTATUSRESPONSE_OPERATIONSTATUS_OPERATIONSTATE"]._serialized_end = 1229
     _globals["_SPARKCONNECTSERVICE"]._serialized_start = 1231
     _globals["_SPARKCONNECTSERVICE"]._serialized_end = 1334

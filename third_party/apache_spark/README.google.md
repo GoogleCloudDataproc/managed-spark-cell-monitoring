@@ -12,8 +12,7 @@ this directory is remapped into the private package namespace
 ## Source Provenance
 
 - **Upstream Apache Spark Base Release:** [`v4.2.0`](https://github.com/apache/spark/tree/v4.2.0) (`32f7299601108917fb01920a54e084595b7b3bf8`)
-- **Internal Dataproc Branch (`dataproc-branch-4.2.0` HEAD):** `73b0dcea60c3fb2a4cddb3ed7763a5d8de8adf0a` (`bigdataoss-internal/third_party/apache/spark`)
-- **Internal Dataproc Source Commit:** `bf11a13e08f8be5ab63d226fe68ec8418e469e73` (`refs/changes/87/196087/9`)
+- **Pinned Spark Source Commit:** `7384499f0307c8309686fdc7450face915853c8e` (`PINNED_SPARK_COMMIT` in `scripts/regen_protos.py`)
 
 ## Included Files & Local Modifications
 
@@ -40,7 +39,7 @@ this directory is remapped into the private package namespace
 
 ## Regenerating Stubs
 
-From a virtual environment with `grpcio-tools` (and `ruff`) installed:
+From a virtual environment with `grpcio-tools` and `pyink` installed:
 
 ```sh
 # Regenerate *_pb2.py from local .proto files:
@@ -49,7 +48,7 @@ python scripts/regen_protos.py
 # Verify checked-in *_pb2.py files are up to date:
 python scripts/regen_protos.py --check
 
-# Refresh .proto files, NOTICE, METADATA, and stubs from bigdataoss-internal
-# (for example, once Gerrit CL 196087 merges into dataproc-branch-4.2.0):
-python scripts/regen_protos.py --ref refs/heads/dataproc-branch-4.2.0
+# Refresh .proto files, NOTICE, METADATA, and stubs from PINNED_SPARK_COMMIT
+# (or pass --ref <sha-or-tag> to bump PINNED_SPARK_COMMIT):
+python scripts/regen_protos.py --remote <spark-git-url-or-path>
 ```

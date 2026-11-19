@@ -69,7 +69,9 @@ class TestVendoredProtoCompliance(unittest.TestCase):
 
         # Only dependency subdirectories belong directly under third_party/.
         top_entries = [
-            p.name for p in (REPO_ROOT / "third_party").iterdir() if p.name != "__pycache__"
+            p.name
+            for p in (REPO_ROOT / "third_party").iterdir()
+            if p.name != "__pycache__"
         ]
         self.assertEqual(top_entries, ["apache_spark"])
 
@@ -102,13 +104,17 @@ class TestVendoredProtoCompliance(unittest.TestCase):
         self.assertIn("The Apache Software Foundation", notice_text)
 
     def test_grpc_method_constant_matches_service_descriptor(self):
-        svc = spark_connect_status_pb2.DESCRIPTOR.services_by_name["SparkConnectService"]
+        svc = spark_connect_status_pb2.DESCRIPTOR.services_by_name[
+            "SparkConnectService"
+        ]
         method = svc.methods_by_name["GetStatus"]
         expected = f"/{svc.full_name}/{method.name}"
         self.assertEqual(expected, "/spark.connect.SparkConnectService/GetStatus")
         self.assertEqual(apache_spark.GRPC_GET_STATUS_METHOD, expected)
         self.assertEqual(method.input_type.full_name, "spark.connect.GetStatusRequest")
-        self.assertEqual(method.output_type.full_name, "spark.connect.GetStatusResponse")
+        self.assertEqual(
+            method.output_type.full_name, "spark.connect.GetStatusResponse"
+        )
 
     def test_wheel_and_sdist_remapping(self):
         if importlib.util.find_spec("hatchling") is None:
@@ -140,7 +146,9 @@ class TestVendoredProtoCompliance(unittest.TestCase):
 
             with zipfile.ZipFile(wheels[0]) as zf:
                 names = zf.namelist()
-                self.assertEqual(len(names), len(set(names)), "Duplicate zip entries in wheel")
+                self.assertEqual(
+                    len(names), len(set(names)), "Duplicate zip entries in wheel"
+                )
                 self.assertFalse(
                     any(n.startswith("third_party/") for n in names),
                     "Wheel must never install top-level third_party/",
@@ -186,7 +194,9 @@ class TestDescriptorPoolIsolation(unittest.TestCase):
             )
         )
         self.assertIsNotNone(
-            default_pool.FindMessageTypeByName("dataproc.cellmonitor.v1.CellMonitorTelemetry")
+            default_pool.FindMessageTypeByName(
+                "dataproc.cellmonitor.v1.CellMonitorTelemetry"
+            )
         )
 
     def test_import_orders_with_pyspark_base_pb2(self):
@@ -302,14 +312,20 @@ class TestProtoWireCompatibilityAndRoundTrip(unittest.TestCase):
                 vendored_req.SerializeToString()
             )
             self.assertEqual(pyspark_req.session_id, vendored_req.session_id)
-            self.assertEqual(list(pyspark_req.operation_status.operation_ids), ["op-42"])
+            self.assertEqual(
+                list(pyspark_req.operation_status.operation_ids), ["op-42"]
+            )
             unpacked_42 = cell_monitor_pb2.CellMonitorTelemetryRequest()
-            self.assertTrue(pyspark_req.operation_status.extensions[0].Unpack(unpacked_42))
+            self.assertTrue(
+                pyspark_req.operation_status.extensions[0].Unpack(unpacked_42)
+            )
             self.assertEqual(dict(unpacked_42.since_versions), {"op-42": 99})
             self.assertTrue(unpacked_42.wait_for_final)
 
     def test_get_status_request_pack_unpack_multi_op_and_wait_for_final(self):
-        telemetry_req = cell_monitor_pb2.CellMonitorTelemetryRequest(wait_for_final=True)
+        telemetry_req = cell_monitor_pb2.CellMonitorTelemetryRequest(
+            wait_for_final=True
+        )
         telemetry_req.since_versions["op-a"] = 14
         telemetry_req.since_versions["op-b"] = 21
 
@@ -333,7 +349,9 @@ class TestProtoWireCompatibilityAndRoundTrip(unittest.TestCase):
         self.assertEqual(decoded.session_id, "00112233-4455-6677-8899-aabbccddeeff")
         self.assertEqual(decoded.user_context.user_id, "user-123")
         self.assertEqual(decoded.client_type, "google-cloud-spark-connect")
-        self.assertEqual(decoded.client_observed_server_side_session_id, "srv-session-1")
+        self.assertEqual(
+            decoded.client_observed_server_side_session_id, "srv-session-1"
+        )
         self.assertEqual(list(decoded.operation_status.operation_ids), ["op-a", "op-b"])
 
         ext = decoded.operation_status.extensions[0]
@@ -409,7 +427,9 @@ class TestProtoWireCompatibilityAndRoundTrip(unittest.TestCase):
             resp.SerializeToString()
         )
         self.assertEqual(len(decoded_resp.operation_statuses), 2)
-        self.assertEqual(decoded_resp.operation_statuses[1].state, op_state.OPERATION_STATE_UNKNOWN)
+        self.assertEqual(
+            decoded_resp.operation_statuses[1].state, op_state.OPERATION_STATE_UNKNOWN
+        )
         self.assertEqual(len(decoded_resp.operation_statuses[1].extensions), 0)
 
         decoded_ext = decoded_resp.operation_statuses[0].extensions[0]
@@ -421,7 +441,9 @@ class TestProtoWireCompatibilityAndRoundTrip(unittest.TestCase):
         self.assertFalse(decoded_telemetry.unchanged)
         self.assertTrue(decoded_telemetry.final_snapshot)
         self.assertEqual(len(decoded_telemetry.jobs), 1)
-        self.assertEqual(decoded_telemetry.jobs[0].status, telemetry_cls.JOB_STATUS_SUCCEEDED)
+        self.assertEqual(
+            decoded_telemetry.jobs[0].status, telemetry_cls.JOB_STATUS_SUCCEEDED
+        )
         self.assertEqual(decoded_telemetry.jobs[0].num_tasks, 9)
         self.assertEqual(decoded_telemetry.jobs[0].num_completed_tasks, 9)
         self.assertEqual(decoded_telemetry.running_tasks.slot_width_ms, 200)
@@ -443,7 +465,9 @@ class TestRegenProtosScript(unittest.TestCase):
 
     def test_build_minimal_status_proto_roundtrip(self):
         regen = self._load_regen_module()
-        current_proto = (VENDOR_DIR / "spark_connect_status.proto").read_text(encoding="utf-8")
+        current_proto = (VENDOR_DIR / "spark_connect_status.proto").read_text(
+            encoding="utf-8"
+        )
         rebuilt = regen.build_minimal_status_proto(current_proto)
         self.assertEqual(rebuilt, current_proto)
 
@@ -451,6 +475,8 @@ class TestRegenProtosScript(unittest.TestCase):
         if importlib.util.find_spec("grpc_tools") is None:
             self.skipTest("grpcio-tools not installed")
         regen = self._load_regen_module()
+        if regen.find_pyink_cmd() is None:
+            self.skipTest("pyink not installed")
         self.assertEqual(regen.compile_protos(check_only=True), 0)
 
 
