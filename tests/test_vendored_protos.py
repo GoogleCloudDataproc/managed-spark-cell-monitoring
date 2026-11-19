@@ -36,6 +36,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 VENDOR_DIR = REPO_ROOT / "third_party" / "apache_spark"
 
 
+def _has_pyspark_connect_protos() -> bool:
+    try:
+        return (
+            importlib.util.find_spec("pyspark.sql.connect.proto.base_pb2") is not None
+        )
+    except ModuleNotFoundError:
+        return False
+
+
 def _run_python(code: str, env: dict[str, str] | None = None):
     """Runs Python code via stdin (avoiding PySpark 4.2 -c doctest quirk)."""
     return subprocess.run(
@@ -200,7 +209,7 @@ class TestDescriptorPoolIsolation(unittest.TestCase):
         )
 
     def test_import_orders_with_pyspark_base_pb2(self):
-        if importlib.util.find_spec("pyspark.sql.connect.proto.base_pb2") is None:
+        if not _has_pyspark_connect_protos():
             self.skipTest("pyspark connect protos not installed")
 
         pyspark_first = """\
@@ -238,7 +247,7 @@ assert base_pb2.UserContext.DESCRIPTOR.full_name == "spark.connect.UserContext"
                 self.assertEqual(res.returncode, 0, res.stderr)
 
     def test_pure_python_protobuf_backend_no_collision(self):
-        if importlib.util.find_spec("pyspark.sql.connect.proto.base_pb2") is None:
+        if not _has_pyspark_connect_protos():
             self.skipTest("pyspark connect protos not installed")
 
         snippet = """\
@@ -272,7 +281,7 @@ class TestProtoWireCompatibilityAndRoundTrip(unittest.TestCase):
     """Verifies wire compatibility and Any.Pack/Unpack roundtrips."""
 
     def test_user_context_wire_compatibility_with_pyspark(self):
-        if importlib.util.find_spec("pyspark.sql.connect.proto.base_pb2") is None:
+        if not _has_pyspark_connect_protos():
             self.skipTest("pyspark connect protos not installed")
 
         from pyspark.sql.connect.proto import base_pb2 as pyspark_base_pb2
