@@ -83,6 +83,10 @@ export class Cell {
     return this.jobs.filter(job => job.status === 'FAILED').length;
   }
 
+  get numCancelledJobs() {
+    return this.jobs.filter(job => job.status === 'CANCELLED').length;
+  }
+
   get numCompletedJobs() {
     return this.jobs.filter(job => job.status === 'COMPLETED').length;
   }

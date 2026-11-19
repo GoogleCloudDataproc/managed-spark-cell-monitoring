@@ -19,11 +19,14 @@ import { makeAutoObservable } from 'mobx';
 
 import type { Cell } from './cell';
 
+export type JobStatusType = 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+
 export class SparkJob {
   uniqueId!: string;
   cellId!: string;
   jobId!: string;
-  status: 'RUNNING' | 'COMPLETED' | 'FAILED' = 'RUNNING';
+  operationId: string | undefined = undefined;
+  status: JobStatusType = 'RUNNING';
   name = 'Unnamed';
   startTime!: Date;
   // Initialised explicitly so MobX makes it observable (see NotebookStore).
@@ -34,6 +37,7 @@ export class SparkJob {
   numActiveTasks = 0;
   numCompletedTasks = 0;
   numFailedTasks = 0;
+  hasServerTaskCounts = false;
 
   cell: Cell | undefined = undefined;
 

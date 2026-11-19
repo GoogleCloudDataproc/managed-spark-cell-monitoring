@@ -651,27 +651,7 @@ def _patch_spark_context(extension_context):
     logger.warning('Failed to monkey-patch SparkContext: %s', e)
 
 
-def _register_cellmonitor_magic(ipython):
-  """Registers `%cellmonitor on|off|status` as a user-facing toggle."""
-
-  def cellmonitor(line=''):
-    arg = (line or '').strip().lower()
-    if arg in ('on', 'enable', 'enabled', 'true', '1'):
-      cell_monitoring.set_enabled(True)
-    elif arg in ('off', 'disable', 'disabled', 'false', '0'):
-      cell_monitoring.set_enabled(False)
-    elif arg not in ('', 'status'):
-      print('Usage: %cellmonitor [on|off|status]')
-      return
-    state = 'on' if cell_monitoring.is_enabled() else 'off'
-    print(f'Managed Spark cell monitoring is {state}')
-
-  try:
-    ipython.register_magic_function(
-        cellmonitor, magic_kind='line', magic_name='cellmonitor'
-    )
-  except Exception:  # pylint: disable=broad-exception-caught
-    logger.debug('Could not register %%cellmonitor magic', exc_info=True)
+_register_cellmonitor_magic = cell_monitoring.register_cellmonitor_magic
 
 
 def load_ipython_extension(ipython):

@@ -16,9 +16,13 @@ Leveraging [AnyWidget](https://anywidget.dev/), it enables platform-agnostic, ze
 
 ## Architecture Overview
 
-1. **Scala Listener (`scalalistener`):** Plugs into the Apache Spark driver's `SparkListener` bus to capture fine-grained task and stage metrics with lock-free queueing and delta-change metric caching.
-2. **Python Kernel Extension (`managed_spark_cell_monitoring.kernelextension`):** Intercepts cell execution hooks (`pre_run_cell`, `post_run_cell`) and routes telemetry events to active widget instances via Jupyter Comms.
-3. **AnyWidget React Frontend (`managed_spark_cell_monitoring/static/widget.js`):** Modular React 18 / MobX frontend compiled via `esbuild`, providing isolated UI components for the job table and task chart.
+1. **Classic PySpark Mode:**
+   - **Scala Listener (`scalalistener`):** Plugs into the Apache Spark driver's `SparkListener` bus to capture fine-grained task and stage metrics with lock-free queueing and delta-change metric caching.
+   - **Python Kernel Extension (`managed_spark_cell_monitoring.kernelextension`):** Intercepts cell execution hooks (`pre_run_cell`, `post_run_cell`) and routes telemetry events to active widget instances via Jupyter Comms.
+2. **Spark Connect Snapshot Mode:**
+   - **Python Controller & Poller (`managed_spark_cell_monitoring.spark_connect`):** Tracks the active notebook cell across worker threads (`contextvars`), polls `GetStatus` for `CellMonitorTelemetry` protobuf extensions, and reconciles terminal snapshots per operation.
+   - **Automatic Fallback:** If a Spark Connect server does not implement `GetStatus` (`UNIMPLEMENTED`) or omits `CellMonitorTelemetry` on task-bearing operations, the poller falls back cleanly for that session without disrupting execution.
+3. **AnyWidget React Frontend (`managed_spark_cell_monitoring/static/widget.js`):** Modular React 18 / MobX frontend compiled via `esbuild`, providing isolated UI components for the job table, header summary, and task chart in both classic event-stream mode and Spark Connect snapshot mode.
 
 ---
 
@@ -29,7 +33,11 @@ Leveraging [AnyWidget](https://anywidget.dev/), it enables platform-agnostic, ze
 Install the pre-built package from PyPI (no Node.js, Yarn, Java, or SBT required on client machines):
 
 ```bash
+# Classic PySpark notebooks
 pip install managed-spark-cell-monitoring
+
+# With Spark Connect polling dependencies (grpcio, protobuf)
+pip install "managed-spark-cell-monitoring[connect]"
 ```
 
 ### 2. Enable in Notebook
@@ -73,6 +81,28 @@ spark = (
 )
 ```
 
+### 4. Spark Connect Usage & Toggling
+
+For remote Spark Connect sessions (such as Google Cloud Dataproc Serverless Interactive via `managed-spark-connect-python`), load the Spark Connect IPython extension or let your client session call `get_spark_connect_controller().ensure_current_shell_attached()` and create a `CellMonitorPoller` via `create_session_poller(client, ...)`:
+
+```python
+%load_ext managed_spark_cell_monitoring.spark_connect
+```
+
+You can also toggle in-cell monitoring at runtime in either mode using the line magic or environment variable:
+
+```python
+%cellmonitor status   # or on / off
+```
+
+Setting `MANAGED_SPARK_CELL_MONITORING_ENABLED=0` (or `false`, `off`, `no`) starts the kernel with monitoring disabled.
+
+#### Spark Connect Notes & Differences vs. Classic PySpark
+
+- **Server Requirement & Fallback:** Snapshot mode requires a Spark Connect server that exposes `CellMonitorTelemetry` in `GetStatusResponse` extensions. Servers without that support trigger automatic per-session fallback (`on_fallback`) so built-in progress reporting can take over.
+- **Lazy Widget Display:** In Spark Connect mode, a cell widget is displayed only after at least one Spark job is observed for the cell; pure-Python cells and jobless SQL/DDL operations leave no empty widget behind.
+- **Per-Operation Snapshots:** Telemetry is aggregated and deduplicated per `(operation_id, version)` over `GetStatus` RPCs rather than streamed over a local driver socket, so Spark driver JAR configuration (`get_jar_path` / `spark.extraListeners`) is not required on the notebook kernel.
+
 ---
 
 ## Development & Building
@@ -80,7 +110,7 @@ spark = (
 ### Prerequisites
 - **Node.js** (>= 18.0) & **Yarn**
 - **Java JDK** (8, 11, or 17) & **SBT**
-- **Python** (>= 3.8)
+- **Python** (>= 3.10)
 
 ### Building from Source
 

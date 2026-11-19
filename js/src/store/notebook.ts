@@ -19,6 +19,7 @@ import { makeAutoObservable } from 'mobx';
 import { SparkStage } from './spark-stage';
 import { SparkJob } from './spark-job';
 import { Cell } from './cell';
+import { applyOperationTelemetry } from './operation-telemetry';
 
 /**
  * Task counters of a job, summed over its stages. Skipped stages count as
@@ -48,6 +49,9 @@ export class NotebookStore {
   // Stages feed the task totals of their job; their timing metadata is kept
   // for a future timeline view (no current view renders stages).
   stages: { [stageId: string]: SparkStage } = {};
+  operationVersions: { [operationId: string]: number } = {};
+  operationFinalized: { [operationId: string]: boolean } = {};
+  operationCellIds: { [operationId: string]: string } = {};
 
   constructor(public notebookPanelId: string) {
     makeAutoObservable(this);
@@ -85,10 +89,19 @@ export class NotebookStore {
 
   private deleteCellData(cellId: string) {
     const cell = this.cells[cellId];
+    const opIds = new Set<string>();
+    Object.entries(this.operationCellIds).forEach(([opId, ownerCellId]) => {
+      if (ownerCellId === cellId) {
+        opIds.add(opId);
+      }
+    });
     if (cell) {
       cell.uniqueJobIds.forEach(uniqueJobId => {
         const job = this.jobs[uniqueJobId];
         if (job) {
+          if (job.operationId) {
+            opIds.add(job.operationId);
+          }
           job.uniqueStageIds.forEach(uniqueStageId => {
             const stage = this.stages[uniqueStageId];
             if (stage) {
@@ -100,6 +113,11 @@ export class NotebookStore {
       });
       delete this.cells[cellId];
     }
+    opIds.forEach((opId) => {
+      delete this.operationVersions[opId];
+      delete this.operationFinalized[opId];
+      delete this.operationCellIds[opId];
+    });
   }
 
   onCellRemoved(cellId: string) {
@@ -157,7 +175,7 @@ export class NotebookStore {
   }
 
   /** Recomputes a job's task counters from its stages. */
-  private recomputeJobTasks(job: SparkJob) {
+  recomputeJobTasks(job: SparkJob) {
     const totals = this.sumStageTasks(job);
     job.numTasks = totals.numTasks;
     job.numActiveTasks = totals.numActiveTasks;
@@ -379,5 +397,15 @@ export class NotebookStore {
         job.cell?.taskChartStore.onSparkStageActive(time, job.numActiveTasks);
       }
     }
+  }
+
+  /**
+   * Applies an authoritative Spark Connect `GetStatus` `CellMonitorTelemetry`
+   * snapshot for one operation in `cellId`. Idempotent per `(operation_id,
+   * version)` and handles multi-operation cells as well as terminal snapshots
+   * with `final_snapshot === false`.
+   */
+  onOperationTelemetry(cellId: string, data: any) {
+    applyOperationTelemetry(this, cellId, data);
   }
 }

@@ -15,7 +15,24 @@
  * limitations under the License.
  */
 
+import { makeAutoObservable, observable } from 'mobx';
 import type { NotebookStore } from './notebook';
+import {
+  mergeOperationSeries,
+  prepareOperationSeriesPoints,
+  StepPoint,
+} from './running-tasks';
+
+export interface RunningTasksSnapshot {
+  slot_width_ms: number;
+  start_time_ms: number;
+  values: number[];
+}
+
+export interface OperationJobMarker {
+  time: number;
+  text: string;
+}
 
 export class TaskChartStore {
   jobDataX: Array<number> = [];
@@ -27,7 +44,27 @@ export class TaskChartStore {
   taskDataY: Array<number> = [];
   numActiveTasks = 0;
 
-  constructor(private notebookStore: NotebookStore) {}
+  private operationSeries = new Map<string, StepPoint[]>();
+  private operationJobMarkers = new Map<string, OperationJobMarker[]>();
+
+  constructor(private notebookStore: NotebookStore) {
+    makeAutoObservable<
+      TaskChartStore,
+      'notebookStore' | 'operationSeries' | 'operationJobMarkers'
+    >(this, {
+      notebookStore: false,
+      operationSeries: false,
+      operationJobMarkers: false,
+      jobDataX: observable.shallow,
+      jobDataY: observable.shallow,
+      jobDataText: observable.shallow,
+      executorDataX: observable.shallow,
+      executorDataY: observable.shallow,
+      taskDataX: observable.shallow,
+      taskDataY: observable.shallow,
+    });
+  }
+
   reset() {
     this.jobDataX = [];
     this.jobDataY = [];
@@ -37,6 +74,65 @@ export class TaskChartStore {
     this.taskDataX = [];
     this.taskDataY = [];
     this.numActiveTasks = 0;
+    this.operationSeries.clear();
+    this.operationJobMarkers.clear();
+  }
+
+  removeOperation(operationId: string) {
+    const hadSeries = this.operationSeries.delete(operationId);
+    const hadMarkers = this.operationJobMarkers.delete(operationId);
+    if (hadSeries || hadMarkers) {
+      this.rebuildFromOperations();
+    }
+  }
+
+  getOperationMaxTime(operationId: string): number {
+    const pts = this.operationSeries.get(operationId);
+    if (!pts || pts.length === 0) {
+      return Number.NaN;
+    }
+    return pts[pts.length - 1].time;
+  }
+
+  /**
+   * Replaces `operationId`'s RunningTasks step series and job boundary markers,
+   * then recomputes the merged cell-level chart series across all operations in
+   * the cell. When `closeOutAt` is provided (terminal operation), ensures the
+   * operation's running-task contribution drops to 0.
+   */
+  updateOperationSeries(
+    operationId: string,
+    runningTasks: RunningTasksSnapshot | null | undefined,
+    jobMarkers: OperationJobMarker[],
+    options: {
+      replaceSeries: boolean;
+      closeOutAt?: number;
+    },
+  ) {
+    this.operationJobMarkers.set(operationId, jobMarkers);
+    const points = prepareOperationSeriesPoints(
+      this.operationSeries.get(operationId),
+      runningTasks,
+      options,
+    );
+    this.operationSeries.set(operationId, points);
+    this.rebuildFromOperations();
+  }
+
+  private rebuildFromOperations() {
+    const merged = mergeOperationSeries(
+      this.operationSeries,
+      this.operationJobMarkers,
+      this.notebookStore.numTotalCores || 0,
+    );
+    this.taskDataX = merged.taskDataX;
+    this.taskDataY = merged.taskDataY;
+    this.executorDataX = merged.executorDataX;
+    this.executorDataY = merged.executorDataY;
+    this.jobDataX = merged.jobDataX;
+    this.jobDataY = merged.jobDataY;
+    this.jobDataText = merged.jobDataText;
+    this.numActiveTasks = merged.numActiveTasks;
   }
 
   /**

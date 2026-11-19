@@ -127,6 +127,29 @@ def remove_state_listener(callback):
       _state_listeners.remove(callback)
 
 
+def register_cellmonitor_magic(ipython):
+  """Registers `%cellmonitor [on|off|status]` on `ipython`."""
+
+  def cellmonitor(line: str = ""):
+    arg = (line or "").strip().lower()
+    if arg in ("on", "enable", "enabled", "true", "1"):
+      set_enabled(True)
+    elif arg in ("off", "disable", "disabled", "false", "0"):
+      set_enabled(False)
+    elif arg not in ("", "status"):
+      print("Usage: %cellmonitor [on|off|status]")
+      return
+    state = "on" if is_enabled() else "off"
+    print(f"Managed Spark cell monitoring is {state}")
+
+  try:
+    ipython.register_magic_function(
+        cellmonitor, magic_kind="line", magic_name="cellmonitor"
+    )
+  except Exception:  # pylint: disable=broad-exception-caught
+    logger.debug("Could not register %%cellmonitor magic", exc_info=True)
+
+
 def get_jar_path(spark_version: str = "3") -> str:
   """Returns the path to the bundled Scala listener JAR.
 
