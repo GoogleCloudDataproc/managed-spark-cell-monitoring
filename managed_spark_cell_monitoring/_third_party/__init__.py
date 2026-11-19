@@ -20,5 +20,8 @@ from pathlib import Path
 # `<repo>/third_party` on `__path__` as well.
 _HERE = Path(__file__).resolve().parent
 _REPO_THIRD_PARTY = _HERE.parents[1] / "third_party"
-if not (_HERE / "apache_spark").is_dir() and (_REPO_THIRD_PARTY / "apache_spark").is_dir():
+if (
+    not (_HERE / "apache_spark").is_dir()
+    and (_REPO_THIRD_PARTY / "apache_spark").is_dir()
+):
     __path__.append(str(_REPO_THIRD_PARTY))

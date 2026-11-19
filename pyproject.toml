@@ -55,6 +55,7 @@ test = [
 # only supports Core Metadata up to 2.4 (newer hatchling defaults to 2.5).
 core-metadata-version = "2.4"
 ignore-vcs = true
+dev-mode-dirs = ["."]
 packages = [
     "managed_spark_cell_monitoring",
     "third_party/apache_spark",
