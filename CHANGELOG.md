@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.3](https://github.com/GoogleCloudDataproc/managed-spark-cell-monitoring/compare/v1.0.2...v1.0.3) (2026-11-21)
+
+
+### Dependencies
+
+* bump @typescript-eslint/parser from 8.69.0 to 8.72.1 in /js ([#50](https://github.com/GoogleCloudDataproc/managed-spark-cell-monitoring/issues/50)) ([506e394](https://github.com/GoogleCloudDataproc/managed-spark-cell-monitoring/commit/506e394c983229c77d7de9f0f56c2f8a4fecc5ae))
+* bump ts-jest from 29.4.12 to 29.4.15 in /js ([#52](https://github.com/GoogleCloudDataproc/managed-spark-cell-monitoring/issues/52)) ([5ca9bf9](https://github.com/GoogleCloudDataproc/managed-spark-cell-monitoring/commit/5ca9bf9437356998429f0358ca4b1ac2183ddf91))
+
 ## [1.0.2](https://github.com/GoogleCloudDataproc/managed-spark-cell-monitoring/compare/v1.0.1...v1.0.2) (2026-11-06)
 
 
