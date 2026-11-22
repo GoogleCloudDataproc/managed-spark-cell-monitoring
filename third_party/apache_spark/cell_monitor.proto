@@ -1,0 +1,99 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+syntax = "proto3";
+
+// Dataproc Cell Monitor: job and task telemetry of a Spark Connect operation.
+//
+// Owned by Dataproc, not part of the Spark Connect protocol. Packed in google.protobuf.Any: a
+// CellMonitorTelemetryRequest in GetStatusRequest.OperationStatusRequest.extensions; a
+// CellMonitorTelemetry in each GetStatusResponse.OperationStatus.extensions when tracked.
+// All `*_time_ms` fields are epoch milliseconds on the driver clock.
+package dataproc.cellmonitor.v1;
+
+option java_multiple_files = true;
+option java_package = "org.apache.spark.connect.dataproc.proto";
+
+message CellMonitorTelemetryRequest {
+  // Last `CellMonitorTelemetry.version` received per `operation_id`. A matching version yields
+  // an `unchanged` response; any other or absent entry yields a full snapshot. Any entry also
+  // skips waiting for the operation to start under `wait_for_final`.
+  map<string, int64> since_versions = 1;
+
+  // Wait, up to 1 s by default and shared across the request, for each operation to reach
+  // `final_snapshot`. Set on the final poll after ExecutePlan returns.
+  bool wait_for_final = 2;
+}
+
+message CellMonitorTelemetry {
+  // Increases as the operation progresses.
+  int64 version = 1;
+
+  // The version matches `since_versions`: `jobs` is empty and `running_tasks` is unset; keep the
+  // previous snapshot.
+  bool unchanged = 2;
+
+  // The ends of the operation and of all its jobs were observed; the snapshot will not change.
+  // They arrive asynchronously, so this can be false after ExecutePlan returns (and
+  // `OperationStatus.state` can still be RUNNING or TERMINATING). If still false after
+  // `wait_for_final`, show RUNNING jobs as ended with the ExecutePlan outcome and no running
+  // tasks.
+  bool final_snapshot = 3;
+
+  // Ordered by job id. All running jobs and a bounded number of ended jobs (oldest evicted).
+  repeated JobTelemetry jobs = 4;
+
+  // Unset (on a changed response) when every slot is 0.
+  RunningTasks running_tasks = 5;
+
+  enum JobStatus {
+    JOB_STATUS_UNSPECIFIED = 0;
+    JOB_STATUS_RUNNING = 1;
+    JOB_STATUS_SUCCEEDED = 2;
+    JOB_STATUS_FAILED = 3;
+    JOB_STATUS_CANCELLED = 4;
+  }
+
+  // Counters sum the stages of the job while it runs (each partition completes once across
+  // attempts and `num_tasks` never shrinks) and settle when it ends (`num_active_tasks` is 0, and
+  // SUCCEEDED has `num_completed_tasks` = `num_tasks`). Stages skipped because their output was
+  // already available count as completed; stages never submitted before the job failed or was
+  // cancelled count 0 completed tasks.
+  message JobTelemetry {
+    int64 job_id = 1;
+    JobStatus status = 2;
+    optional int64 submission_time_ms = 3;
+    // Only set together with `submission_time_ms`.
+    optional int64 completion_time_ms = 4;
+    int64 num_tasks = 5;
+    int64 num_completed_tasks = 6;
+    int64 num_active_tasks = 7;
+    int64 num_failed_tasks = 8;
+  }
+
+  // Running tasks over time in fixed-width slots; each value is the count at the end of its slot,
+  // so tasks shorter than a slot may not show. Tasks no longer followed (e.g. killed with a failed
+  // job) end at the latest observed time. Each response carries the full series.
+  message RunningTasks {
+    // Doubles (merging slot pairs) to keep the series bounded.
+    int64 slot_width_ms = 1;
+    // A multiple of `slot_width_ms`; slot `i` starts at `start_time_ms + i * slot_width_ms`.
+    int64 start_time_ms = 2;
+    // Up to the latest slot with an event; the last value holds afterwards.
+    repeated int32 values = 3;
+  }
+}
