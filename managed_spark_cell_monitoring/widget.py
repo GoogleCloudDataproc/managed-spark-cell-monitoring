@@ -107,6 +107,7 @@ class ManagedSparkCellWidget(anywidget.AnyWidget):
     self.final_job_starts = {}
     self.final_job_ends = {}
     self.final_stage_completions = {}
+    self.operation_snapshots = {}
     self.final_state_sent = False
     self.on_msg(self._handle_frontend_message)
 
@@ -119,6 +120,33 @@ class ManagedSparkCellWidget(anywidget.AnyWidget):
       self.final_job_starts.clear()
       self.final_job_ends.clear()
       self.final_stage_completions.clear()
+      self.operation_snapshots.clear()
+
+  def send_operation_telemetry(self, snapshot):
+    """Syncs an authoritative Spark Connect operation snapshot to the frontend."""
+    if not isinstance(snapshot, dict):
+      return
+    payload = dict(snapshot)
+    payload["type"] = "operation_telemetry"
+    op_id = payload.get("operation_id")
+    if op_id:
+      op_key = str(op_id)
+      existing = self.operation_snapshots.get(op_key)
+      if payload.get("unchanged") and existing is not None:
+        merged = dict(existing)
+        merged["version"] = payload.get("version", existing.get("version", 0))
+        merged["operation_state"] = payload.get(
+            "operation_state", existing.get("operation_state", "")
+        )
+        merged["final_snapshot"] = bool(payload.get("final_snapshot"))
+        if "execution_outcome" in payload:
+          merged["execution_outcome"] = payload["execution_outcome"]
+        if "closed_at" in payload:
+          merged["closed_at"] = payload["closed_at"]
+        self.operation_snapshots[op_key] = merged
+      else:
+        self.operation_snapshots[op_key] = payload
+    self.send(payload)
 
   def append_event(self, event, sequence):
     """Sync a new telemetry event packet to the frontend Backbone model."""
@@ -194,5 +222,11 @@ class ManagedSparkCellWidget(anywidget.AnyWidget):
           "from_sequence": from_seq,
           "events": matching,
       })
+    elif msg_type == "widget_ready":
+      if self.operation_snapshots:
+        self.send({
+            "type": "replay_snapshots",
+            "snapshots": list(self.operation_snapshots.values()),
+        })
     elif msg_type == "widget_unmount":
       self.cleanup(clear_history=True)

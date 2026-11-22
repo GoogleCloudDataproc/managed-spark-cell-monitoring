@@ -104,6 +104,14 @@
   color: #db3636;
   font-weight: 500;
 }
+.pm .active-job-cancelled-icon {
+  flex: none;
+  color: #747775;
+}
+.pm .active-job-cancelled-text {
+  color: #747775;
+  font-weight: 500;
+}
 
 /* --------------Stacked progress bar-------------------- */
 .pm .stacked-progress {
@@ -177,6 +185,14 @@
 .vscode-high-contrast .pm .active-job-spinner {
   border-color: rgba(225, 227, 225, 0.3);
   border-top-color: #e1e3e1;
+}
+[data-jp-theme-light='false'] .pm .active-job-cancelled-icon,
+.vscode-dark .pm .active-job-cancelled-icon,
+.vscode-high-contrast .pm .active-job-cancelled-icon,
+[data-jp-theme-light='false'] .pm .active-job-cancelled-text,
+.vscode-dark .pm .active-job-cancelled-text,
+.vscode-high-contrast .pm .active-job-cancelled-text {
+  color: #e1e3e1;
 }
 
 /* --------------Reduced motion-------------------- */
